@@ -10,6 +10,7 @@ enum HanaSettingsKey {
     static let showPlayedIndicator = "hana.settings.showPlayedIndicator"
     static let videoLanguage = "hana.settings.videoLanguage"
     static let pictureInPictureEnabled = "hana.settings.pictureInPictureEnabled"
+    static let loopPlaybackEnabled = "hana.settings.loopPlaybackEnabled"
     static let playerLongPressRate = "hana.settings.playerLongPressRate"
     static let hKeyframesEnabled = "hana.settings.hKeyframesEnabled"
     static let hKeyframeCountdownSeconds = "hana.settings.hKeyframeCountdownSeconds"

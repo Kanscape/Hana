@@ -856,8 +856,10 @@ private struct LocalVideoPlayback: Identifiable {
 
 private struct LocalVideoPlayerSheet: View {
     @Environment(\.dismiss) private var dismiss
+    @AppStorage(HanaSettingsKey.loopPlaybackEnabled) private var loopPlaybackEnabled = false
     let playback: LocalVideoPlayback
     @State private var player: AVPlayer?
+    @State private var playbackLoopController = HanaPlaybackLoopController()
 
     var body: some View {
         NavigationStack {
@@ -881,12 +883,25 @@ private struct LocalVideoPlayerSheet: View {
                 nextPlayer.isMuted = false
                 nextPlayer.volume = 1.0
                 player = nextPlayer
+                configurePlaybackLoop(player: nextPlayer)
                 nextPlayer.play()
             }
+            .onChange(of: loopPlaybackEnabled) {
+                configurePlaybackLoop(player: player)
+            }
             .onDisappear {
+                playbackLoopController.invalidate()
                 player?.pause()
                 HanaPlaybackAudioSession.deactivateAfterPlayback()
             }
         }
+    }
+
+    private func configurePlaybackLoop(player: AVPlayer?) {
+        playbackLoopController.configure(
+            player: player,
+            item: player?.currentItem,
+            isLoopingEnabled: loopPlaybackEnabled
+        )
     }
 }

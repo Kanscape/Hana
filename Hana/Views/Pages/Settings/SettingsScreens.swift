@@ -114,6 +114,7 @@ private struct PlaybackSettingsScreen: View {
     @AppStorage(HanaSettingsKey.showPlayedIndicator) private var showPlayedIndicator = true
     @AppStorage(HanaSettingsKey.videoLanguage) private var videoLanguage = HanaVideoLanguagePreference.zhHans.rawValue
     @AppStorage(HanaSettingsKey.pictureInPictureEnabled) private var pictureInPictureEnabled = true
+    @AppStorage(HanaSettingsKey.loopPlaybackEnabled) private var loopPlaybackEnabled = false
     @AppStorage(HanaSettingsKey.playerLongPressRate) private var playerLongPressRate = HanaPlaybackSpeedCatalog.defaultLongPressRate
 
     var body: some View {
@@ -135,6 +136,9 @@ private struct PlaybackSettingsScreen: View {
                 }
                 Toggle(isOn: $pictureInPictureEnabled) {
                     Label("画中画", systemImage: "pip")
+                }
+                Toggle(isOn: $loopPlaybackEnabled) {
+                    Label("循环播放", systemImage: "repeat")
                 }
             }
 

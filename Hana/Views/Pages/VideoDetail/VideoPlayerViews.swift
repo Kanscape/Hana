@@ -9,6 +9,7 @@ struct VideoPlayerPanel: View {
     @Environment(\.modelContext) private var modelContext
     @AppStorage(HanaSettingsKey.allowResumePlayback) private var allowResumePlayback = true
     @AppStorage(HanaSettingsKey.pictureInPictureEnabled) private var pictureInPictureEnabled = true
+    @AppStorage(HanaSettingsKey.loopPlaybackEnabled) private var loopPlaybackEnabled = false
     @AppStorage(HanaSettingsKey.playerLongPressRate) private var playerLongPressRate = HanaPlaybackSpeedCatalog.defaultLongPressRate
     let video: HanimeVideo
     @Binding var selectedLinkID: String
@@ -26,6 +27,7 @@ struct VideoPlayerPanel: View {
     @State private var restoredProgress: TimeInterval = 0
     @State private var fullscreenLifecycleTask: Task<Void, Never>?
     @State private var isPlaybackActive = false
+    @State private var playbackLoopController = HanaPlaybackLoopController()
 
     private var selectedLink: ResolutionLink? {
         video.resolutions.first { $0.id == selectedLinkID } ?? video.resolutions.first
@@ -45,6 +47,7 @@ struct VideoPlayerPanel: View {
                     HanaAVPlayerView(
                         player: player,
                         allowsPictureInPicture: pictureInPictureEnabled,
+                        exitsFullScreenWhenPlaybackEnds: !loopPlaybackEnabled,
                         gestureConfiguration: HanaPlayerGestureConfiguration(
                             longPressRate: playerLongPressRate
                         ),
@@ -101,6 +104,9 @@ struct VideoPlayerPanel: View {
             savePlaybackProgress()
             configurePlayer(force: true)
         }
+        .onChange(of: loopPlaybackEnabled) {
+            configurePlaybackLoop(player: player, item: player?.currentItem)
+        }
         .onDisappear {
             scheduleTeardown()
         }
@@ -118,10 +124,12 @@ struct VideoPlayerPanel: View {
             activePlayer = nil
             isPlayerReady = false
             isPlaybackActive = false
+            playbackLoopController.invalidate()
             return
         }
         guard force || configuredLinkID != selectedLink.id || player?.currentItem == nil else {
             activePlayer = player
+            configurePlaybackLoop(player: player, item: player?.currentItem)
             startProgressTracking()
             return
         }
@@ -139,8 +147,18 @@ struct VideoPlayerPanel: View {
         restoredProgress = playback.isReused ? 0 : resumeTime
         player = playback.entry.player
         activePlayer = playback.entry.player
+        configurePlaybackLoop(player: playback.entry.player, item: playback.entry.item)
         updatePlaybackSnapshot()
         startProgressTracking()
+    }
+
+    private func configurePlaybackLoop(player: AVPlayer?, item: AVPlayerItem?) {
+        playbackLoopController.configure(
+            player: player,
+            item: item,
+            isLoopingEnabled: loopPlaybackEnabled,
+            onPlaybackEnded: savePlaybackProgress
+        )
     }
 
     private func scheduleTeardown() {

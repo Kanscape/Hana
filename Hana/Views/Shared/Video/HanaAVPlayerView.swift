@@ -19,6 +19,7 @@ enum HanaVideoFullscreenOrientation: Hashable {
 struct HanaAVPlayerView: UIViewControllerRepresentable {
     let player: AVPlayer?
     let allowsPictureInPicture: Bool
+    var exitsFullScreenWhenPlaybackEnds = true
     let gestureConfiguration: HanaPlayerGestureConfiguration
     var fullscreenStatusOverlay: AnyView? = nil
     var onFullscreenChange: (Bool) -> Void = { _ in }
@@ -64,7 +65,7 @@ struct HanaAVPlayerView: UIViewControllerRepresentable {
         controller.showsPlaybackControls = true
         controller.requiresLinearPlayback = false
         controller.entersFullScreenWhenPlaybackBegins = false
-        controller.exitsFullScreenWhenPlaybackEnds = true
+        controller.exitsFullScreenWhenPlaybackEnds = exitsFullScreenWhenPlaybackEnds
         context.coordinator.updateFullscreenStatusOverlay(fullscreenStatusOverlay, on: controller)
     }
 
