@@ -27,6 +27,56 @@ struct ContentView: View {
     var body: some View {
         @Bindable var siteSession = services.siteSession
 
+        rootContent
+        .sheet(item: $siteSession.activeFlow) { flow in
+            SiteWebSessionSheet(
+                flow: flow,
+                onComplete: { cookies in
+                    completeSiteWebFlow(with: cookies)
+                },
+                onCancel: {
+                    services.siteSession.cancel()
+                }
+            )
+        }
+        .task {
+            await refreshLoginStateFromStoredCookies()
+            await synchronizeDownloadsAtLaunch()
+        }
+        .tint(appThemeColor)
+        .accentColor(appThemeColor)
+        .preferredColorScheme(HanaAppearanceMode(rawValue: appearanceMode)?.colorScheme)
+    }
+
+    @ViewBuilder
+    private var rootContent: some View {
+#if os(macOS)
+        NavigationSplitView {
+            List(selection: $selectedTab) {
+                NavigationLink(value: AppTab.discover) {
+                    Label("发现", systemImage: "sparkles")
+                }
+                NavigationLink(value: AppTab.subscriptions) {
+                    Label("订阅", systemImage: "play.rectangle.on.rectangle")
+                }
+                NavigationLink(value: AppTab.favorites) {
+                    Label("收藏", systemImage: "heart")
+                }
+                NavigationLink(value: AppTab.profile) {
+                    Label("我的", systemImage: "person.crop.circle")
+                }
+                NavigationLink(value: AppTab.search) {
+                    Label("搜索", systemImage: "magnifyingglass")
+                }
+            }
+            .navigationTitle("Hana")
+        } detail: {
+            NavigationStack {
+                tabContent(for: selectedTab)
+                    .navigationDestination(for: HanaRoute.self, destination: destination)
+            }
+        }
+#else
         TabView(selection: $selectedTab) {
             Tab("发现", systemImage: "sparkles", value: AppTab.discover) {
                 NavigationStack {
@@ -66,24 +116,23 @@ struct ContentView: View {
             }
         }
         .hanaTabSearchActivation()
-        .sheet(item: $siteSession.activeFlow) { flow in
-            SiteWebSessionSheet(
-                flow: flow,
-                onComplete: { cookies in
-                    completeSiteWebFlow(with: cookies)
-                },
-                onCancel: {
-                    services.siteSession.cancel()
-                }
-            )
+#endif
+    }
+
+    @ViewBuilder
+    private func tabContent(for tab: AppTab) -> some View {
+        switch tab {
+        case .discover:
+            HomeScreen()
+        case .subscriptions:
+            SubscriptionsScreen()
+        case .favorites:
+            FavoritesScreen()
+        case .profile:
+            ProfileScreen()
+        case .search:
+            SearchScreen()
         }
-        .task {
-            await refreshLoginStateFromStoredCookies()
-            await synchronizeDownloadsAtLaunch()
-        }
-        .tint(appThemeColor)
-        .accentColor(appThemeColor)
-        .preferredColorScheme(HanaAppearanceMode(rawValue: appearanceMode)?.colorScheme)
     }
 
     @ViewBuilder

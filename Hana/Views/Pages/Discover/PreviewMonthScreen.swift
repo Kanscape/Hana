@@ -1,7 +1,6 @@
 import AVKit
 import SwiftData
 import SwiftUI
-import UIKit
 import UniformTypeIdentifiers
 
 struct PreviewMonthScreen: View {
@@ -436,7 +435,7 @@ private struct PreviewImageViewer: View {
                         .tag(url)
                 }
             }
-            .tabViewStyle(.page(indexDisplayMode: urls.count > 1 ? .automatic : .never))
+            .hanaPreviewImagePagerStyle(showIndex: urls.count > 1)
             .background(Color.black)
             .safeAreaInset(edge: .bottom) {
                 if urls.count > 1 {
@@ -448,7 +447,7 @@ private struct PreviewImageViewer: View {
                 }
             }
             .navigationTitle("预告图片")
-            .navigationBarTitleDisplayMode(.inline)
+            .hanaInlineNavigationTitleDisplayMode()
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     HanaToolbarIconButton(title: "关闭", systemImage: "xmark") {
@@ -555,7 +554,7 @@ private struct PreviewImageGridSheet: View {
                 .padding()
             }
             .navigationTitle("全部图片")
-            .navigationBarTitleDisplayMode(.inline)
+            .hanaInlineNavigationTitleDisplayMode()
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     HanaToolbarIconButton(title: "关闭", systemImage: "xmark") {

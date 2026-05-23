@@ -1,7 +1,6 @@
 import AVKit
 import SwiftData
 import SwiftUI
-import UIKit
 import UniformTypeIdentifiers
 
 private let defaultDownloadGroupName = "默认分组"
@@ -20,7 +19,7 @@ struct DownloadsScreen: View {
     @State private var isGroupManagerPresented = false
     @State private var movingDownloadItem: DownloadQueueRecord?
     @State private var newGroupName = ""
-    @State private var editMode: EditMode = .inactive
+    @State private var isSelectionModeActive = false
 
     var body: some View {
         List {
@@ -38,7 +37,6 @@ struct DownloadsScreen: View {
                 }
             )
         }
-        .environment(\.editMode, $editMode)
         .navigationTitle("已下载的视频")
         .hanaToast($toastMessage)
         .hanaFeedbackAlert($alertMessage)
@@ -131,12 +129,12 @@ struct DownloadsScreen: View {
     }
 
     private var isEditing: Bool {
-        editMode.isEditing
+        isSelectionModeActive
     }
 
     private func toggleEditMode() {
         withAnimation(.smooth(duration: 0.2)) {
-            editMode = editMode.isEditing ? .inactive : .active
+            isSelectionModeActive.toggle()
         }
     }
 
@@ -868,7 +866,7 @@ private struct LocalVideoPlayerSheet: View {
                 .ignoresSafeArea(edges: .bottom)
             .navigationTitle(playback.title)
 #if os(iOS) || os(visionOS)
-            .navigationBarTitleDisplayMode(.inline)
+            .hanaInlineNavigationTitleDisplayMode()
 #endif
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {

@@ -1,7 +1,6 @@
 import AVKit
 import SwiftData
 import SwiftUI
-import UIKit
 import UniformTypeIdentifiers
 
 enum AccountVideoListSort: String, CaseIterable, Identifiable {
@@ -48,7 +47,7 @@ struct AccountVideoListScreen: View {
     @State private var alertMessage: HanaAlertMessage?
     @State private var filterText = ""
     @State private var sort = AccountVideoListSort.siteOrder
-    @State private var editMode: EditMode = .inactive
+    @State private var isSelectionModeActive = false
     @State private var selectedVideoCodes = Set<String>()
     @State private var isDeleteConfirmationPresented = false
 
@@ -118,7 +117,6 @@ struct AccountVideoListScreen: View {
                 }
             }
         }
-        .environment(\.editMode, $editMode)
         .hanaToast($toastMessage)
         .hanaFeedbackAlert($alertMessage)
         .confirmationDialog("删除所选视频？", isPresented: $isDeleteConfirmationPresented, titleVisibility: .visible) {
@@ -258,7 +256,7 @@ struct AccountVideoListScreen: View {
     }
 
     private var isEditing: Bool {
-        editMode.isEditing
+        isSelectionModeActive
     }
 
     private var currentVisibleVideos: [HanimeInfo] {
@@ -272,11 +270,11 @@ struct AccountVideoListScreen: View {
     }
 
     private func toggleSelectionMode() {
-        if editMode.isEditing {
-            editMode = .inactive
+        if isSelectionModeActive {
+            isSelectionModeActive = false
             selectedVideoCodes.removeAll()
         } else {
-            editMode = .active
+            isSelectionModeActive = true
         }
     }
 

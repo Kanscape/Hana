@@ -1,14 +1,13 @@
 import AVKit
 import SwiftData
 import SwiftUI
-import UIKit
 import UniformTypeIdentifiers
 
 struct WatchHistoryScreen: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \WatchHistoryRecord.watchDate, order: .reverse) private var watchHistory: [WatchHistoryRecord]
     @State private var isClearConfirmationPresented = false
-    @State private var editMode: EditMode = .inactive
+    @State private var isSelectionModeActive = false
 
     var body: some View {
         List {
@@ -30,7 +29,6 @@ struct WatchHistoryScreen: View {
                 .onDelete(perform: delete)
             }
         }
-        .environment(\.editMode, $editMode)
         .navigationTitle("观看记录")
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
@@ -61,7 +59,7 @@ struct WatchHistoryScreen: View {
     }
 
     private var isEditing: Bool {
-        editMode.isEditing
+        isSelectionModeActive
     }
 
     private var visibleWatchHistory: [WatchHistoryRecord] {
@@ -70,7 +68,7 @@ struct WatchHistoryScreen: View {
 
     private func toggleEditMode() {
         withAnimation(.smooth(duration: 0.2)) {
-            editMode = editMode.isEditing ? .inactive : .active
+            isSelectionModeActive.toggle()
         }
     }
 

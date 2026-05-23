@@ -1,10 +1,19 @@
 import AVKit
 import SwiftData
 import SwiftUI
-import UIKit
 import UniformTypeIdentifiers
 
 struct SettingsScreen: View {
+    var body: some View {
+#if os(macOS)
+        MacSettingsScreen()
+#else
+        MobileSettingsScreen()
+#endif
+    }
+}
+
+private struct MobileSettingsScreen: View {
     var body: some View {
         List {
             Section {
@@ -77,6 +86,38 @@ struct SettingsScreen: View {
             .listRowSeparator(.hidden)
         }
         .navigationTitle("设置")
+    }
+}
+
+private struct MacSettingsScreen: View {
+    var body: some View {
+        TabView {
+            Tab("播放", systemImage: "play.rectangle") {
+                PlaybackSettingsScreen()
+            }
+
+            Tab("HKeyframes", systemImage: "bookmark") {
+                HKeyframeSettingsScreen()
+            }
+
+            Tab("下载", systemImage: "arrow.down.circle") {
+                DownloadSettingsScreen()
+            }
+
+            Tab("外观", systemImage: "circle.lefthalf.filled") {
+                AppearanceSettingsScreen()
+            }
+
+            Tab("网络", systemImage: "network") {
+                NetworkSettingsScreen()
+            }
+
+            Tab("本地数据", systemImage: "internaldrive") {
+                LocalDataSettingsScreen()
+            }
+        }
+        .scenePadding()
+        .frame(minWidth: 560, idealWidth: 640, minHeight: 460, idealHeight: 560)
     }
 }
 
@@ -426,15 +467,15 @@ private struct NetworkSettingsScreen: View {
                 if selectedProxyMode.requiresEndpoint {
                     LabeledContent {
                         TextField("主机", text: $proxyHost)
-                            .textInputAutocapitalization(.never)
-                            .keyboardType(.URL)
+                            .hanaTextInputAutocapitalizationNever()
+                            .hanaURLKeyboard()
                             .multilineTextAlignment(.trailing)
                     } label: {
                         Label("主机", systemImage: "server.rack")
                     }
                     LabeledContent {
                         TextField("端口", value: $proxyPort, format: .number)
-                            .keyboardType(.numberPad)
+                            .hanaNumberKeyboard()
                             .multilineTextAlignment(.trailing)
                     } label: {
                         Label("端口", systemImage: "number")

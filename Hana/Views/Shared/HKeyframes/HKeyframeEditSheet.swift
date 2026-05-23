@@ -25,7 +25,7 @@ struct HKeyframeEditSheet: View {
                 Section("时间") {
                     LabeledContent("时间", value: formatTime(TimeInterval(positionMilliseconds) / 1_000))
                     TextField("位置（毫秒）", value: $positionMilliseconds, format: .number)
-                        .keyboardType(.numberPad)
+                        .hanaNumberKeyboard()
                     HStack {
                         Button("-5 秒") { adjust(by: -5_000) }
                         Button("-1 秒") { adjust(by: -1_000) }

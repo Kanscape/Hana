@@ -47,8 +47,8 @@ struct SiteCredentialLoginSheet: View {
                 Section("站点账号") {
                     TextField("邮箱", text: $email)
                         .textContentType(.username)
-                        .textInputAutocapitalization(.never)
-                        .keyboardType(.emailAddress)
+                        .hanaTextInputAutocapitalizationNever()
+                        .hanaEmailKeyboard()
                     SecureField("密码", text: $password)
                         .textContentType(.password)
                 }

@@ -1,7 +1,6 @@
 import AVKit
 import SwiftData
 import SwiftUI
-import UIKit
 import UniformTypeIdentifiers
 
 struct VideoDetailScreen: View {
@@ -45,7 +44,7 @@ struct VideoDetailScreen: View {
             }
         }
         .navigationTitle("详情")
-        .navigationBarTitleDisplayMode(.inline)
+        .hanaInlineNavigationTitleDisplayMode()
         .toolbar {
             videoQualityToolbar
         }

@@ -72,11 +72,13 @@ struct ProfileScreen: View {
                 }
             }
 
+#if !os(macOS)
             Section {
                 NavigationLink(value: HanaRoute.settings) {
                     Label("设置", systemImage: "gearshape")
                 }
             }
+#endif
         }
         .navigationTitle("我的")
         .task(id: accountSummaryTaskID) {

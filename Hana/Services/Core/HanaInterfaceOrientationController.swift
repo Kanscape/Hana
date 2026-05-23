@@ -1,16 +1,19 @@
+#if canImport(UIKit) && os(iOS)
 import UIKit
 
+typealias HanaInterfaceOrientationMask = UIInterfaceOrientationMask
+
 enum HanaInterfaceOrientationController {
-    private static let normalMask: UIInterfaceOrientationMask = UIDevice.current.userInterfaceIdiom == .pad ? .all : .portrait
-    private static var currentMask: UIInterfaceOrientationMask = normalMask
+    private static let normalMask: HanaInterfaceOrientationMask = UIDevice.current.userInterfaceIdiom == .pad ? .all : .portrait
+    private static var currentMask: HanaInterfaceOrientationMask = normalMask
     private static var isVideoFullscreenActive = false
     private static var preparationTask: Task<Void, Never>?
 
-    static var supportedInterfaceOrientations: UIInterfaceOrientationMask {
+    static var supportedInterfaceOrientations: HanaInterfaceOrientationMask {
         currentMask
     }
 
-    static func prepareVideoFullscreen(_ mask: UIInterfaceOrientationMask) {
+    static func prepareVideoFullscreen(_ mask: HanaInterfaceOrientationMask) {
         preparationTask?.cancel()
         currentMask = mask
         preparationTask = Task { @MainActor in
@@ -30,7 +33,7 @@ enum HanaInterfaceOrientationController {
         request(normalMask)
     }
 
-    static func enterVideoFullscreen(_ mask: UIInterfaceOrientationMask) {
+    static func enterVideoFullscreen(_ mask: HanaInterfaceOrientationMask) {
         preparationTask?.cancel()
         isVideoFullscreenActive = true
         currentMask = mask
@@ -48,7 +51,7 @@ enum HanaInterfaceOrientationController {
         request(currentMask)
     }
 
-    private static func request(_ mask: UIInterfaceOrientationMask) {
+    private static func request(_ mask: HanaInterfaceOrientationMask) {
         for scene in activeWindowScenes {
             updateSupportedInterfaceOrientations(in: scene)
             scene.requestGeometryUpdate(
@@ -82,3 +85,17 @@ enum HanaInterfaceOrientationController {
         updateSupportedInterfaceOrientations(from: controller.presentedViewController)
     }
 }
+#else
+struct HanaInterfaceOrientationMask: Hashable {
+    static let portrait = HanaInterfaceOrientationMask()
+    static let landscape = HanaInterfaceOrientationMask()
+}
+
+enum HanaInterfaceOrientationController {
+    static func prepareVideoFullscreen(_ mask: HanaInterfaceOrientationMask) {}
+    static func cancelVideoFullscreenPreparation() {}
+    static func enterVideoFullscreen(_ mask: HanaInterfaceOrientationMask) {}
+    static func exitVideoFullscreen() {}
+    static func refreshCurrentOrientationMask() {}
+}
+#endif

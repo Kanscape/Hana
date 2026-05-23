@@ -1,7 +1,6 @@
 import AVKit
 import SwiftData
 import SwiftUI
-import UIKit
 import UniformTypeIdentifiers
 
 enum HanimeCommentSort: String, CaseIterable, Identifiable {
@@ -452,7 +451,7 @@ struct HanimeCommentThreadView: View {
         }
         .navigationTitle("回复")
         .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
+            ToolbarItem(placement: .cancellationAction) {
                 HanaToolbarIconButton(title: "关闭", systemImage: "xmark") {
                     dismiss()
                 }

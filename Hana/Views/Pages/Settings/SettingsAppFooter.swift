@@ -1,5 +1,11 @@
 import SwiftUI
+#if canImport(UIKit)
 import UIKit
+typealias SettingsPlatformImage = UIImage
+#elseif canImport(AppKit)
+import AppKit
+typealias SettingsPlatformImage = NSImage
+#endif
 
 struct SettingsAppFooter: View {
     private let appInfo = SettingsAppInfo.current
@@ -7,7 +13,7 @@ struct SettingsAppFooter: View {
     var body: some View {
         VStack(spacing: 8) {
             if let icon = appInfo.icon {
-                Image(uiImage: icon)
+                settingsAppIconImage(icon)
                     .resizable()
                     .scaledToFill()
                     .frame(width: 64, height: 64)
@@ -33,10 +39,18 @@ struct SettingsAppFooter: View {
     }
 }
 
+private func settingsAppIconImage(_ icon: SettingsPlatformImage) -> Image {
+#if canImport(UIKit)
+    Image(uiImage: icon)
+#elseif canImport(AppKit)
+    Image(nsImage: icon)
+#endif
+}
+
 private struct SettingsAppInfo {
     let name: String
     let versionText: String
-    let icon: UIImage?
+    let icon: SettingsPlatformImage?
 
     static var current: SettingsAppInfo {
         let bundle = Bundle.main
@@ -52,7 +66,8 @@ private struct SettingsAppInfo {
         )
     }
 
-    private static func primaryIcon(in bundle: Bundle) -> UIImage? {
+    private static func primaryIcon(in bundle: Bundle) -> SettingsPlatformImage? {
+#if canImport(UIKit)
         guard let icons = bundle.object(forInfoDictionaryKey: "CFBundleIcons") as? [String: Any],
               let primaryIcon = icons["CFBundlePrimaryIcon"] as? [String: Any],
               let iconFiles = primaryIcon["CFBundleIconFiles"] as? [String],
@@ -60,6 +75,14 @@ private struct SettingsAppInfo {
             return nil
         }
         return UIImage(named: iconName)
+#elseif canImport(AppKit)
+        if let iconName = bundle.object(forInfoDictionaryKey: "CFBundleIconFile") as? String {
+            return NSImage(named: iconName)
+        }
+        return nil
+#else
+        return nil
+#endif
     }
 }
 

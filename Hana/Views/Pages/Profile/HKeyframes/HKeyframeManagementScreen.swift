@@ -1,6 +1,5 @@
 import SwiftData
 import SwiftUI
-import UIKit
 
 struct HKeyframeManagementScreen: View {
     @Environment(\.modelContext) private var modelContext
@@ -52,7 +51,7 @@ struct HKeyframeManagementScreen: View {
 
     private func importFromPasteboard() {
         do {
-            guard let text = UIPasteboard.general.string else {
+            guard let text = HanaPasteboard.string else {
                 throw HanaHKeyframeImportError.invalidShareText
             }
             let record = try HanaHKeyframeLibrary.decodeShareText(text)
@@ -223,7 +222,7 @@ struct HKeyframeRecordDetailScreen: View {
 
     private func copyShareText() {
         do {
-            UIPasteboard.general.string = try HanaHKeyframeLibrary.shareText(for: record)
+            HanaPasteboard.string = try HanaHKeyframeLibrary.shareText(for: record)
             toastMessage = .success("已复制到剪贴板")
         } catch {
             alertMessage = .error(error.localizedDescription)

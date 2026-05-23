@@ -1,7 +1,6 @@
 import AVKit
 import SwiftData
 import SwiftUI
-import UIKit
 import UniformTypeIdentifiers
 
 struct DetailSection<Content: View>: View {
@@ -71,7 +70,7 @@ struct FlowTags: View {
 
     private func copyTagButton(_ tag: String) -> some View {
         Button {
-            UIPasteboard.general.string = tag
+            HanaPasteboard.string = tag
         } label: {
             Label("复制标签", systemImage: "doc.on.doc")
         }

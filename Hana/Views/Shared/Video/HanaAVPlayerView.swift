@@ -1,12 +1,17 @@
 import AVFoundation
 import AVKit
 import SwiftUI
+#if canImport(UIKit)
+import UIKit
+#elseif canImport(AppKit)
+import AppKit
+#endif
 
 enum HanaVideoFullscreenOrientation: Hashable {
     case portrait
     case landscape
 
-    var interfaceMask: UIInterfaceOrientationMask {
+    var interfaceMask: HanaInterfaceOrientationMask {
         switch self {
         case .portrait:
             .portrait
@@ -16,6 +21,7 @@ enum HanaVideoFullscreenOrientation: Hashable {
     }
 }
 
+#if canImport(UIKit)
 struct HanaAVPlayerView: UIViewControllerRepresentable {
     let player: AVPlayer?
     let allowsPictureInPicture: Bool
@@ -389,6 +395,34 @@ struct HanaAVPlayerView: UIViewControllerRepresentable {
         }
     }
 }
+#elseif canImport(AppKit)
+struct HanaAVPlayerView: NSViewRepresentable {
+    let player: AVPlayer?
+    let allowsPictureInPicture: Bool
+    var exitsFullScreenWhenPlaybackEnds = true
+    let gestureConfiguration: HanaPlayerGestureConfiguration
+    var fullscreenStatusOverlay: AnyView? = nil
+    var onFullscreenChange: (Bool) -> Void = { _ in }
+    var onPotentialFullscreenIntent: () -> Void = {}
+
+    func makeNSView(context: Context) -> AVPlayerView {
+        let view = AVPlayerView()
+        view.player = player
+        view.controlsStyle = .inline
+        return view
+    }
+
+    func updateNSView(_ view: AVPlayerView, context: Context) {
+        if view.player !== player {
+            view.player = player
+        }
+    }
+
+    static func dismantleNSView(_ view: AVPlayerView, coordinator: ()) {
+        view.player = nil
+    }
+}
+#endif
 
 @MainActor
 enum HanaAVPlayerFullscreenState {
@@ -407,6 +441,7 @@ enum HanaAVPlayerFullscreenState {
     }
 }
 
+#if canImport(UIKit)
 @MainActor
 private enum HanaAVPlayerFullscreenRetainer {
     private static var coordinators: [ObjectIdentifier: AnyObject] = [:]
@@ -419,6 +454,7 @@ private enum HanaAVPlayerFullscreenRetainer {
         coordinators.removeValue(forKey: ObjectIdentifier(coordinator))
     }
 }
+#endif
 
 struct HanaPlayerGestureConfiguration: Equatable {
     var longPressRate: Double

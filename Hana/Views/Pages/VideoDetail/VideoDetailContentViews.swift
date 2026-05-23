@@ -1,7 +1,6 @@
 import AVKit
 import SwiftData
 import SwiftUI
-import UIKit
 import UniformTypeIdentifiers
 
 struct VideoDetailHeader: View {
@@ -169,7 +168,7 @@ struct VideoArtistSection: View {
         .buttonStyle(.borderedProminent)
         .buttonBorderShape(.capsule)
         .controlSize(.large)
-        .tint(artist.isSubscribed ? Color(uiColor: .secondarySystemFill) : .white)
+        .tint(artist.isSubscribed ? Color.secondary.opacity(0.25) : .white)
         .foregroundStyle(artist.isSubscribed ? Color.primary : Color.black)
         .animation(.snappy(duration: 0.22), value: artist.isSubscribed)
         .sensoryFeedback(.selection, trigger: artist.isSubscribed)

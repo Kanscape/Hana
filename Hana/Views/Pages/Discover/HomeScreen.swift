@@ -1,7 +1,6 @@
 import AVKit
 import SwiftData
 import SwiftUI
-import UIKit
 import UniformTypeIdentifiers
 
 struct HomeScreen: View {
@@ -28,7 +27,7 @@ struct HomeScreen: View {
                             .padding(.top, 16)
                         .padding(.bottom)
                     }
-                    .background(Color(uiColor: .systemBackground))
+                    .hanaSystemBackground()
                 }
             case .failed(let message):
                 ContentUnavailableView {
@@ -41,9 +40,7 @@ struct HomeScreen: View {
             }
         }
         .navigationTitle("Hana")
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbarBackground(.hidden, for: .navigationBar)
-        .toolbarBackground(.visible, for: .tabBar)
+        .hanaMobileNavigationChrome()
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
                 NavigationLink {

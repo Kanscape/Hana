@@ -7,9 +7,12 @@
 
 import SwiftUI
 import SwiftData
+#if canImport(UIKit) && os(iOS)
 import UIKit
+#endif
 import UserNotifications
 
+#if canImport(UIKit) && os(iOS)
 final class HanaAppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
     func application(
         _ application: UIApplication,
@@ -44,10 +47,13 @@ final class HanaAppDelegate: NSObject, UIApplicationDelegate, UNUserNotification
         [.banner, .list, .sound]
     }
 }
+#endif
 
 @main
 struct HanaApp: App {
+#if canImport(UIKit) && os(iOS)
     @UIApplicationDelegateAdaptor(HanaAppDelegate.self) private var appDelegate
+#endif
     @State private var services = HanaServices()
     @State private var servicesIdentity = UUID()
 
@@ -78,12 +84,25 @@ struct HanaApp: App {
             ContentView()
                 .id(servicesIdentity)
                 .environment(services)
-                .environment(\.hanaReloadServices, HanaServiceReloadAction { baseURL in
-                    services.siteSession.cancel()
-                    services = HanaServices(baseURL: baseURL)
-                    servicesIdentity = UUID()
-                })
+                .environment(\.hanaReloadServices, reloadServicesAction)
         }
         .modelContainer(sharedModelContainer)
+
+#if os(macOS)
+        Settings {
+            SettingsScreen()
+                .environment(services)
+                .environment(\.hanaReloadServices, reloadServicesAction)
+        }
+        .modelContainer(sharedModelContainer)
+#endif
+    }
+
+    private var reloadServicesAction: HanaServiceReloadAction {
+        HanaServiceReloadAction { baseURL in
+            services.siteSession.cancel()
+            services = HanaServices(baseURL: baseURL)
+            servicesIdentity = UUID()
+        }
     }
 }

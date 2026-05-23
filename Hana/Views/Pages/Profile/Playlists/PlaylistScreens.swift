@@ -1,7 +1,6 @@
 import AVKit
 import SwiftData
 import SwiftUI
-import UIKit
 import UniformTypeIdentifiers
 
 struct WatchLaterScreen: View {
@@ -56,7 +55,7 @@ struct PlaylistsScreen: View {
     @State private var isCreatePlaylistPresented = false
     @State private var filterText = ""
     @State private var sort = PlaylistListSort.siteOrder
-    @State private var editMode: EditMode = .inactive
+    @State private var isSelectionModeActive = false
     @State private var selectedListCodes = Set<String>()
     @State private var isDeleteConfirmationPresented = false
 
@@ -133,7 +132,6 @@ struct PlaylistsScreen: View {
                 }
             }
         }
-        .environment(\.editMode, $editMode)
         .hanaToast($toastMessage)
         .hanaFeedbackAlert($alertMessage)
         .confirmationDialog("删除所选播放清单？", isPresented: $isDeleteConfirmationPresented, titleVisibility: .visible) {
@@ -249,7 +247,7 @@ struct PlaylistsScreen: View {
     }
 
     private var isEditing: Bool {
-        editMode.isEditing
+        isSelectionModeActive
     }
 
     private var currentVisiblePlaylists: [HanimePlaylistSummary] {
@@ -263,11 +261,11 @@ struct PlaylistsScreen: View {
     }
 
     private func toggleSelectionMode() {
-        if editMode.isEditing {
-            editMode = .inactive
+        if isSelectionModeActive {
+            isSelectionModeActive = false
             selectedListCodes.removeAll()
         } else {
-            editMode = .active
+            isSelectionModeActive = true
         }
     }
 
@@ -583,7 +581,7 @@ struct RemotePlaylistDetailScreen: View {
     @State private var isEditorPresented = false
     @State private var filterText = ""
     @State private var sort = AccountVideoListSort.siteOrder
-    @State private var editMode: EditMode = .inactive
+    @State private var isSelectionModeActive = false
     @State private var selectedVideoCodes = Set<String>()
     @State private var isDeleteConfirmationPresented = false
 
@@ -648,8 +646,7 @@ struct RemotePlaylistDetailScreen: View {
 
                 }
             }
-            .environment(\.editMode, $editMode)
-            .hanaToast($toastMessage)
+                .hanaToast($toastMessage)
             .hanaFeedbackAlert($alertMessage)
             .confirmationDialog("从播放清单移除所选视频？", isPresented: $isDeleteConfirmationPresented, titleVisibility: .visible) {
                 Button("移除 \(selectedVideoCodes.count) 个视频", role: .destructive) {
@@ -834,7 +831,7 @@ struct RemotePlaylistDetailScreen: View {
     }
 
     private var isEditing: Bool {
-        editMode.isEditing
+        isSelectionModeActive
     }
 
     private var currentVisibleVideos: [HanimeInfo] {
@@ -848,11 +845,11 @@ struct RemotePlaylistDetailScreen: View {
     }
 
     private func toggleSelectionMode() {
-        if editMode.isEditing {
-            editMode = .inactive
+        if isSelectionModeActive {
+            isSelectionModeActive = false
             selectedVideoCodes.removeAll()
         } else {
-            editMode = .active
+            isSelectionModeActive = true
         }
     }
 

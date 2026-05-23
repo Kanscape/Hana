@@ -1,5 +1,14 @@
 import SwiftUI
+
+#if canImport(UIKit)
 import UIKit
+private let homeHeroSystemBackground = Color(uiColor: .systemBackground)
+#elseif canImport(AppKit)
+import AppKit
+private let homeHeroSystemBackground = Color(nsColor: .windowBackgroundColor)
+#else
+private let homeHeroSystemBackground = Color.white
+#endif
 
 enum HomeHeroMetrics {
     static func heroHeight(width: CGFloat, viewportHeight: CGFloat, safeAreaTop: CGFloat) -> CGFloat {
@@ -124,7 +133,7 @@ struct HomeHeroContentTransition: View {
     }
 
     private var pageBackground: Color {
-        colorScheme == .dark ? .black : Color(uiColor: .systemBackground)
+        colorScheme == .dark ? .black : homeHeroSystemBackground
     }
 
     private func progress(for scrollY: CGFloat, width: CGFloat) -> CGFloat {
@@ -239,7 +248,7 @@ private struct HomeHeroBackgroundLayer: View {
                 .init(color: .clear, location: 0.44),
                 .init(color: .white.opacity(0.18), location: 0.64),
                 .init(color: .white.opacity(0.72), location: 0.86),
-                .init(color: Color(uiColor: .systemBackground), location: 1.00),
+                .init(color: homeHeroSystemBackground, location: 1.00),
             ],
             startPoint: .top,
             endPoint: .bottom
@@ -452,7 +461,7 @@ private struct HomeContentSurface: View {
                 ),
                 style: .continuous
             )
-            .fill(Color(uiColor: .systemBackground))
+            .fill(homeHeroSystemBackground)
         }
     }
 }
