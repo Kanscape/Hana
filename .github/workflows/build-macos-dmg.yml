@@ -1,0 +1,88 @@
+name: Build macOS DMG
+
+'on':
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  build-macos:
+    name: Build unsigned DMG
+    runs-on: macos-26
+
+    env:
+      SCHEME: Hana
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Select Xcode
+        run: |
+          if [ -d /Applications/Xcode_26.5.app/Contents/Developer ]; then
+            echo "DEVELOPER_DIR=/Applications/Xcode_26.5.app/Contents/Developer" >> "$GITHUB_ENV"
+          fi
+
+      - name: Show build environment
+        run: |
+          xcodebuild -version
+          xcodebuild -showsdks
+
+      - name: Build unsigned DMG
+        run: |
+          set -euo pipefail
+
+          short_sha="$(git rev-parse --short=7 HEAD)"
+          derived_data_path="$PWD/build/DerivedData-macOS"
+          products_path="$derived_data_path/Build/Products"
+          staging_dir="$PWD/build/dmg-staging"
+          artifact_dir="$PWD/artifacts"
+          dmg_path="$artifact_dir/Hana-macOS-${short_sha}-unsigned.dmg"
+
+          rm -rf "$derived_data_path" "$staging_dir" "$artifact_dir"
+          mkdir -p "$staging_dir" "$artifact_dir"
+
+          xcodebuild clean build \
+            -project Hana.xcodeproj \
+            -scheme "$SCHEME" \
+            -configuration Release \
+            -destination "generic/platform=macOS" \
+            -derivedDataPath "$derived_data_path" \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO
+
+          app_path="$(find "$products_path" -name "${SCHEME}.app" -type d | head -n 1)"
+
+          if [ -z "$app_path" ]; then
+            echo "No ${SCHEME}.app found under $products_path"
+            exit 1
+          fi
+
+          ditto "$app_path" "$staging_dir/${SCHEME}.app"
+          ln -s /Applications "$staging_dir/Applications"
+
+          hdiutil create \
+            -volname "$SCHEME" \
+            -srcfolder "$staging_dir" \
+            -ov \
+            -format UDZO \
+            "$dmg_path"
+
+          hdiutil verify "$dmg_path"
+
+      - name: Upload unsigned DMG
+        uses: actions/upload-artifact@v7
+        with:
+          path: artifacts/*.dmg
+          if-no-files-found: error
+          archive: false

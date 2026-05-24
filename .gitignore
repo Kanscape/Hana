@@ -3,6 +3,7 @@ xcuserdata/
 *.xcscmblueprint
 *.xccheckout
 build/
+artifacts/
 DerivedData/
 *.moved-aside
 *.pbxuser

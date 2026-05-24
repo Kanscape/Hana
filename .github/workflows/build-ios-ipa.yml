@@ -1,0 +1,87 @@
+name: Build iOS IPA
+
+'on':
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  build-ios:
+    name: Build unsigned IPA
+    runs-on: macos-26
+
+    env:
+      SCHEME: Hana
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Select Xcode
+        run: |
+          if [ -d /Applications/Xcode_26.5.app/Contents/Developer ]; then
+            echo "DEVELOPER_DIR=/Applications/Xcode_26.5.app/Contents/Developer" >> "$GITHUB_ENV"
+          fi
+
+      - name: Show build environment
+        run: |
+          xcodebuild -version
+          xcodebuild -showsdks
+
+      - name: Build unsigned IPA
+        run: |
+          set -euo pipefail
+
+          short_sha="$(git rev-parse --short=7 HEAD)"
+          build_dir="$PWD/build"
+          archive_path="$build_dir/Unsigned.xcarchive"
+          payload_path="$build_dir/Payload"
+          artifact_dir="$PWD/artifacts"
+          ipa_name="Hana-iOS-${short_sha}-unsigned.ipa"
+          zip_name="Hana-iOS-${short_sha}-unsigned.zip"
+          ipa_path="$artifact_dir/$ipa_name"
+          zip_path="$artifact_dir/$zip_name"
+
+          rm -rf "$archive_path" "$payload_path" "$artifact_dir"
+          mkdir -p "$payload_path" "$artifact_dir"
+
+          xcodebuild clean archive \
+            -project Hana.xcodeproj \
+            -scheme "$SCHEME" \
+            -configuration Release \
+            -sdk iphoneos \
+            -archivePath "$archive_path" \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO
+
+          app_path="$(find "$archive_path/Products/Applications" -maxdepth 1 -name "*.app" | head -n 1)"
+
+          if [ -z "$app_path" ]; then
+            echo "No .app found under $archive_path/Products/Applications"
+            exit 1
+          fi
+
+          cp -R "$app_path" "$payload_path/"
+
+          cd "$build_dir"
+          zip -qry "$ipa_path" Payload
+
+          cd "$artifact_dir"
+          zip -qry "$zip_path" "$ipa_name"
+
+      - name: Upload unsigned IPA ZIP
+        uses: actions/upload-artifact@v7
+        with:
+          path: artifacts/*.zip
+          if-no-files-found: error
+          archive: false
