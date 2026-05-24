@@ -1,3 +1,5 @@
+![Hana Banner](Assets/Banner.png)
+
 # 🌸 Hana
 
 Hana 是一个使用 SwiftUI 构建的 Hanime1 客户端，面向 iOS、iPadOS、macOS。
