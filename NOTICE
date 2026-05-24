@@ -1,0 +1,36 @@
+Hana
+Copyright 2026-present Kanscape and contributors.
+
+Hana is licensed under the GNU Affero General Public License version 3
+or later. See LICENSE.
+
+Portions of Hana/Resources/SearchOptions and Hana/Resources/HKeyframes
+are derived from Han1meViewer and are licensed under the Apache License
+2.0. These resources were adapted for Hana's SwiftUI implementation on
+iOS, iPadOS, and macOS.
+
+Original project:
+https://github.com/YenalyLiew/Han1meViewer
+
+Reference project:
+https://github.com/misaka10032w/Han1meViewer
+
+Original copyright notice:
+Copyright 2021 Yenaly
+
+The Apache License 2.0 text is included at LICENSES/Apache-2.0.txt.
+
+Third-party dependencies:
+
+- Nuke
+  License: MIT
+  Source: https://github.com/kean/Nuke
+  License text: LICENSES/Nuke-MIT.txt
+
+- SwiftSoup
+  License: MIT
+  Source: https://github.com/scinfu/SwiftSoup
+  License text: LICENSES/SwiftSoup-MIT.txt
+
+This notice is informational and does not modify the applicable license
+terms.
