@@ -49,10 +49,11 @@ struct ProfileDetailScreen: View {
                 .formStyle(.grouped)
             }
             .frame(maxWidth: 760, alignment: .leading)
-            .padding(.horizontal, 40)
             .padding(.vertical, 32)
+            .frame(maxWidth: .infinity, alignment: .center)
+            .padding(.horizontal, 40)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .scrollContentBackground(.visible)
     }
 #endif
@@ -122,11 +123,8 @@ struct ProfileDetailScreen: View {
     }
 
     private var accountStatusText: String {
-        if let userID = services.siteSession.userID {
-            return userID
-        }
         if services.siteSession.isLoggedIn {
-            return "账号资料同步中"
+            return services.siteSession.userID == nil ? "账号资料同步中" : "已登录"
         }
         return "登录后可同步订阅、收藏和账号列表"
     }

@@ -125,7 +125,7 @@ struct ContentView: View {
                     .navigationDestination(for: HanaRoute.self, destination: destination)
             }
         }
-        .hanaMacOSHomeToolbarChrome(isHidden: selectedTab == .discover && macOSNavigationPath.isEmpty)
+        .hanaMacOSWindowToolbarChrome()
         .onChange(of: selectedTab) {
             macOSNavigationPath.removeAll()
         }
@@ -383,10 +383,10 @@ private enum AppTab: Hashable {
 
 private extension View {
     @ViewBuilder
-    func hanaMacOSHomeToolbarChrome(isHidden: Bool) -> some View {
+    func hanaMacOSWindowToolbarChrome() -> some View {
 #if os(macOS)
-        toolbarBackgroundVisibility(isHidden ? .hidden : .automatic, for: .windowToolbar)
-            .toolbar(removing: isHidden ? .title : nil)
+        toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
+            .toolbar(removing: .title)
 #else
         self
 #endif

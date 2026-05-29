@@ -144,6 +144,45 @@ struct HKeyframeRecordDetailScreen: View {
     @State private var isManualAddPresented = false
 
     var body: some View {
+        detailContent
+            .navigationTitle("HKeyframes")
+            .hanaToast($toastMessage)
+            .hanaFeedbackAlert($alertMessage)
+            .onDisappear {
+                try? modelContext.save()
+            }
+            .sheet(item: $editingKeyframe) { keyframe in
+                HKeyframeEditSheet(
+                    title: "编辑关键帧",
+                    initialPositionMilliseconds: keyframe.positionMilliseconds,
+                    initialPrompt: keyframe.prompt ?? ""
+                ) { updated in
+                    record.replace(keyframe, with: updated)
+                    try? modelContext.save()
+                }
+            }
+            .sheet(isPresented: $isManualAddPresented) {
+                HKeyframeEditSheet(
+                    title: "添加关键帧",
+                    initialPositionMilliseconds: 0,
+                    initialPrompt: ""
+                ) { keyframe in
+                    record.append(keyframe)
+                    try? modelContext.save()
+                }
+            }
+    }
+
+    @ViewBuilder
+    private var detailContent: some View {
+#if os(macOS)
+        macOSDetailContent
+#else
+        detailForm
+#endif
+    }
+
+    private var detailForm: some View {
         Form {
             Section("信息") {
                 TextField("标题", text: $record.title)
@@ -210,41 +249,186 @@ struct HKeyframeRecordDetailScreen: View {
                     Label("复制分享文本", systemImage: "square.and.arrow.up")
                 }
                 Button(role: .destructive) {
-                    modelContext.delete(record)
-                    try? modelContext.save()
-                    dismiss()
+                    deleteRecord()
                 } label: {
                     Label("删除整组", systemImage: "trash")
                 }
             }
         }
-        .navigationTitle("HKeyframes")
-        .hanaToast($toastMessage)
-        .hanaFeedbackAlert($alertMessage)
-        .onDisappear {
-            try? modelContext.save()
-        }
-        .sheet(item: $editingKeyframe) { keyframe in
-            HKeyframeEditSheet(
-                title: "编辑关键帧",
-                initialPositionMilliseconds: keyframe.positionMilliseconds,
-                initialPrompt: keyframe.prompt ?? ""
-            ) { updated in
-                record.replace(keyframe, with: updated)
-                try? modelContext.save()
+    }
+
+#if os(macOS)
+    private var macOSDetailContent: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 24) {
+                macOSInfoSection
+
+                Divider()
+
+                macOSKeyframeSection
+
+                Divider()
+
+                macOSActionRow
             }
+            .frame(maxWidth: 760, alignment: .leading)
+            .padding(.horizontal, 36)
+            .padding(.vertical, 28)
         }
-        .sheet(isPresented: $isManualAddPresented) {
-            HKeyframeEditSheet(
-                title: "添加关键帧",
-                initialPositionMilliseconds: 0,
-                initialPrompt: ""
-            ) { keyframe in
-                record.append(keyframe)
-                try? modelContext.save()
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    private var macOSInfoSection: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("信息")
+                .font(.headline)
+
+            Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 12, verticalSpacing: 10) {
+                GridRow {
+                    macOSFieldLabel("标题:")
+                    TextField("标题", text: $record.title)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(maxWidth: 520)
+                }
+
+                GridRow {
+                    macOSFieldLabel("系列:")
+                    TextField("系列", text: Binding(
+                        get: { record.groupTitle ?? "" },
+                        set: { record.groupTitle = $0.nilIfEmpty }
+                    ))
+                    .textFieldStyle(.roundedBorder)
+                    .frame(maxWidth: 360)
+                }
+
+                GridRow {
+                    macOSFieldLabel("集数:")
+                    TextField("集数", value: $record.episode, format: .number)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 90)
+                }
+
+                GridRow {
+                    macOSFieldLabel("番号:")
+                    Text(record.videoCode)
+                        .textSelection(.enabled)
+                }
             }
         }
     }
+
+    private var macOSKeyframeSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("关键帧")
+                    .font(.headline)
+                Spacer()
+                Button {
+                    isManualAddPresented = true
+                } label: {
+                    Label("添加关键帧", systemImage: "plus")
+                }
+                .buttonStyle(.bordered)
+            }
+
+            if record.keyframes.isEmpty {
+                ContentUnavailableView("暂无关键帧", systemImage: "bookmark.slash")
+                    .frame(height: 140)
+            } else {
+                macOSKeyframeRows
+            }
+        }
+    }
+
+    private var macOSKeyframeRows: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 16) {
+                Text("时间")
+                    .frame(width: 120, alignment: .leading)
+                Text("提示")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Text("操作")
+                    .frame(width: 96, alignment: .leading)
+            }
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+
+            Divider()
+
+            ForEach(record.keyframes) { keyframe in
+                HStack(alignment: .firstTextBaseline, spacing: 16) {
+                    Text(formatTime(keyframe.seconds))
+                        .font(.body.monospacedDigit())
+                        .frame(width: 120, alignment: .leading)
+
+                    Text(keyframe.prompt ?? "无")
+                        .foregroundStyle(keyframe.prompt == nil ? .secondary : .primary)
+                        .lineLimit(2)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                    HStack(spacing: 8) {
+                        Button {
+                            editingKeyframe = keyframe
+                        } label: {
+                            Image(systemName: "pencil")
+                        }
+                        .buttonStyle(.borderless)
+                        .help("编辑")
+
+                        Button(role: .destructive) {
+                            delete(keyframe)
+                        } label: {
+                            Image(systemName: "trash")
+                        }
+                        .buttonStyle(.borderless)
+                        .help("删除")
+                    }
+                    .frame(width: 96, alignment: .leading)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 9)
+
+                if keyframe.id != record.keyframes.last?.id {
+                    Divider()
+                }
+            }
+        }
+        .overlay(alignment: .top) {
+            Divider()
+        }
+        .overlay(alignment: .bottom) {
+            Divider()
+        }
+    }
+
+    private var macOSActionRow: some View {
+        HStack {
+            Button {
+                copyShareText()
+            } label: {
+                Label("复制分享文本", systemImage: "square.and.arrow.up")
+            }
+            .buttonStyle(.bordered)
+
+            Spacer()
+
+            Button(role: .destructive) {
+                deleteRecord()
+            } label: {
+                Label("删除整组", systemImage: "trash")
+            }
+            .buttonStyle(.bordered)
+        }
+    }
+
+    private func macOSFieldLabel(_ text: String) -> some View {
+        Text(text)
+            .foregroundStyle(.secondary)
+            .frame(width: 64, alignment: .trailing)
+    }
+#endif
 
     private func copyShareText() {
         do {
@@ -253,5 +437,16 @@ struct HKeyframeRecordDetailScreen: View {
         } catch {
             alertMessage = .error(error.localizedDescription)
         }
+    }
+
+    private func delete(_ keyframe: HKeyframeEntry) {
+        record.remove(keyframe)
+        try? modelContext.save()
+    }
+
+    private func deleteRecord() {
+        modelContext.delete(record)
+        try? modelContext.save()
+        dismiss()
     }
 }

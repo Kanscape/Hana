@@ -18,11 +18,15 @@ extension View {
 
     @ViewBuilder
     func hanaNavigationSubtitle(_ subtitle: String?) -> some View {
+#if os(macOS)
         if let subtitle {
             navigationSubtitle(subtitle)
         } else {
             self
         }
+#else
+        self
+#endif
     }
 
     @ViewBuilder
