@@ -143,6 +143,9 @@ struct VideoPlayerPanel: View {
         guard force || configuredLinkID != selectedLink.id || player?.currentItem == nil else {
             activePlayer = player
             configurePlaybackLoop(player: player, item: player?.currentItem)
+            if !isPlayerReady, let currentItem = player?.currentItem {
+                observePlayerReadiness(currentItem, linkID: configuredLinkID)
+            }
             startProgressTracking()
             return
         }
@@ -184,7 +187,6 @@ struct VideoPlayerPanel: View {
                   !isFullscreenLifecycleActive else { return }
             progressTask?.cancel()
             orientationTask?.cancel()
-            playerReadinessTask?.cancel()
             player?.pause()
             HanaPlaybackAudioSession.deactivateAfterPlayback()
         }
@@ -192,31 +194,35 @@ struct VideoPlayerPanel: View {
 
     private func observePlayerReadiness(_ item: AVPlayerItem, linkID: String) {
         playerReadinessTask?.cancel()
-        if item.status == .readyToPlay {
+        if itemIsReadyForDisplay(item) {
             isPlayerReady = true
             return
         }
         isPlayerReady = false
         playerReadinessTask = Task { @MainActor in
-            while !Task.isCancelled {
+            for _ in 0..<150 {
                 guard configuredLinkID == linkID else { return }
-                switch item.status {
-                case .readyToPlay:
+                if itemIsReadyForDisplay(item) {
                     try? await Task.sleep(for: .milliseconds(120))
                     guard !Task.isCancelled, configuredLinkID == linkID else { return }
                     withAnimation(.smooth(duration: 0.24)) {
                         isPlayerReady = true
                     }
                     return
-                case .failed:
-                    return
-                case .unknown:
-                    try? await Task.sleep(for: .milliseconds(80))
-                @unknown default:
+                }
+                if item.status == .failed {
                     return
                 }
+                if item.status != .unknown {
+                    return
+                }
+                try? await Task.sleep(for: .milliseconds(80))
             }
         }
+    }
+
+    private func itemIsReadyForDisplay(_ item: AVPlayerItem) -> Bool {
+        item.status == .readyToPlay || item.presentationSize != .zero
     }
 
     private func handleFullscreenChange(_ isFullscreen: Bool) {
