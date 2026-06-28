@@ -15,7 +15,34 @@ let package = Package(
     targets: [
         .target(
             name: "DisciplineModeCore",
-            path: "Hana/Features/DisciplineMode/Core"
+            path: "Hana",
+            exclude: [
+                "AppIcon.icon",
+                "Assets.xcassets",
+                "ContentView.swift",
+                "Hana.entitlements",
+                "HanaApp.swift",
+                "Models/HanaSettings.swift",
+                "Models/HanimeModels.swift",
+                "Models/LocalFeatureModels.swift",
+                "Models/PersistenceModels.swift",
+                "Resources",
+                "Services/Core/DisciplineModeStore.swift",
+                "Services/Core/HanaInterfaceOrientationController.swift",
+                "Services/Core/HanaServiceReloadAction.swift",
+                "Services/Core/HanaServices.swift",
+                "Services/Downloads",
+                "Services/Hanime",
+                "Services/Media",
+                "Services/Network",
+                "Services/Profile",
+                "Services/Updates",
+                "Views"
+            ],
+            sources: [
+                "Models/DisciplineModeConfiguration.swift",
+                "Services/Core/DisciplineModeEvaluator.swift"
+            ]
         ),
         .testTarget(
             name: "DisciplineModeCoreTests",
