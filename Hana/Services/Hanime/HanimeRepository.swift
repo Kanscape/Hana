@@ -102,11 +102,6 @@ final class HanimeRepository {
         }
     }
 
-    func preview(monthCode: String) async throws -> HanimePreviewPage {
-        let html = try await httpClient.html(for: .previews(monthCode: monthCode))
-        return try parser.parsePreview(html, monthCode: monthCode)
-    }
-
     func accountVideos(kind: HanimeMyListKind, userID: String, page: Int = 1) async throws -> HanimeAccountVideoList {
         let html = try await httpClient.html(
             for: .accountList(userID: userID, kind: kind, page: page),

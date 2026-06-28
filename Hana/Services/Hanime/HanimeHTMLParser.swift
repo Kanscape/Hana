@@ -43,46 +43,6 @@ struct HanimeHTMLParser {
         return []
     }
 
-    func parsePreview(_ html: String, monthCode: String) throws -> HanimePreviewPage {
-        let body = try documentBody(from: html)
-        let latestCards = try body.select("div[class$=owl-theme] div[class=home-rows-videos-div]").array()
-        let latestVideos = try latestCards.enumerated().compactMap { index, element -> HanimeInfo? in
-            let image = try element.select("img").first()
-            let title = try element.select("div[class$=title], div.home-rows-videos-title").first()?.text().trimmedNonEmpty()
-                ?? image?.attr("alt").trimmedNonEmpty()
-            guard let title else { return nil }
-            let link = try element.select("a[href]").first()?.attr("abs:href")
-            let code = link.flatMap(videoCode(from:)) ?? "preview-\(monthCode)-latest-\(index)"
-            return HanimeInfo(
-                title: title,
-                coverURL: try firstURL(from: image, attribute: "src"),
-                videoCode: code,
-                duration: nil,
-                views: nil,
-                uploadTime: nil,
-                artist: nil,
-                style: .compact
-            )
-        }
-
-        let contentParts = try body.select("div[class=content-padding] > div").array()
-        let items = try stride(from: 0, to: contentParts.count, by: 2).compactMap { index -> HanimePreviewItem? in
-            guard index + 1 < contentParts.count else { return nil }
-            return try parsePreviewItem(firstPart: contentParts[index], secondPart: contentParts[index + 1])
-        }
-
-        let mobileNavigation = try body.select("div.hidden-md.hidden-lg")
-        return HanimePreviewPage(
-            monthCode: monthCode,
-            displayMonth: displayMonth(from: monthCode),
-            headerImageURL: try firstURL(from: body.select("div[id=player-div-wrapper] img").first(), attribute: "src"),
-            hasPrevious: try mobileNavigation.select("div[style*=left]").first() != nil,
-            hasNext: try mobileNavigation.select("div[style*=right]").first() != nil,
-            latestVideos: latestVideos,
-            items: items
-        )
-    }
-
     func parseCurrentUser(_ html: String) throws -> HanimeUserProfile? {
         let body = try documentBody(from: html)
         guard let userInfo = try body.select("div#user-modal-dp-wrapper").first(),
@@ -443,39 +403,6 @@ struct HanimeHTMLParser {
         )
     }
 
-    private func parsePreviewItem(firstPart: Element, secondPart: Element) throws -> HanimePreviewItem? {
-        let videoCode = firstPart.id().trimmedNonEmpty()
-        let title = try firstPart.select("h4").first()?.text().trimmedNonEmpty()
-        let content = try firstPart.getElementsByClass("preview-info-content-padding").first()
-        let videoTitle = try content?.select("h4").first()?.text().trimmedNonEmpty()
-        let brand = try content?.select("h5").first()?.select("a").first()?.text().trimmedNonEmpty()
-        let releaseDate = try content?.select("h5").array().dropFirst().first?.ownText().trimmedNonEmpty()
-        let introduction = try secondPart.select("h5").first()?.text().trimmedNonEmpty()
-        let tags = try secondPart.select("div[class=single-video-tag] > a[href]").array().compactMap { element in
-            try element.text()
-                .replacingOccurrences(of: "#", with: "")
-                .components(separatedBy: " (")
-                .first?
-                .trimmedNonEmpty()
-        }
-        let relatedImageURLs = try secondPart.select("img.preview-image-modal-trigger").array().compactMap { element in
-            try firstURL(from: element, attribute: "src")
-        }
-
-        guard title != nil || videoTitle != nil || videoCode != nil else { return nil }
-        return HanimePreviewItem(
-            title: title,
-            videoTitle: videoTitle,
-            coverURL: try firstURL(from: firstPart.select("div[class=preview-info-cover] > img").first(), attribute: "src"),
-            introduction: introduction,
-            brand: brand,
-            releaseDate: releaseDate,
-            videoCode: videoCode,
-            tags: tags,
-            relatedImageURLs: relatedImageURLs
-        )
-    }
-
     private func parseResolutionLinks(from body: Element) throws -> [ResolutionLink] {
         var links = [ResolutionLink]()
         let sources = try body.select("video#player source[src]").array()
@@ -666,13 +593,6 @@ struct HanimeHTMLParser {
         firstCapture(in: value, pattern: #"const source = '(.+)'"#)
     }
 
-    private func displayMonth(from monthCode: String) -> String {
-        guard let date = Self.previewMonthCodeFormatter.date(from: monthCode) else {
-            return monthCode
-        }
-        return Self.previewMonthDisplayFormatter.string(from: date)
-    }
-
     private func parseViewsAndUploadTime(from value: String?) -> (String?, Date?) {
         guard let value else { return (nil, nil) }
         let pattern = #"(觀看次數|观看次数)\s*[：:]\s*(.+?次)\s*(\d{4}-\d{2}-\d{2})"#
@@ -722,21 +642,6 @@ struct HanimeHTMLParser {
         return formatter
     }()
 
-    private static let previewMonthCodeFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.calendar = Calendar(identifier: .gregorian)
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.dateFormat = "yyyyMM"
-        return formatter
-    }()
-
-    private static let previewMonthDisplayFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.calendar = Calendar(identifier: .gregorian)
-        formatter.locale = Locale(identifier: "zh_Hans_CN")
-        formatter.dateFormat = "yyyy 年 MM 月"
-        return formatter
-    }()
 }
 
 private extension String {

@@ -52,6 +52,19 @@ extension View {
     }
 
     @ViewBuilder
+    func hanaHomeTopScrollEdgeSoft() -> some View {
+#if os(iOS)
+        if #available(iOS 26.0, *) {
+            scrollEdgeEffectStyle(.soft, for: .top)
+        } else {
+            self
+        }
+#else
+        self
+#endif
+    }
+
+    @ViewBuilder
     func hanaInlineNavigationTitleDisplayMode() -> some View {
 #if os(iOS)
         navigationBarTitleDisplayMode(.inline)
