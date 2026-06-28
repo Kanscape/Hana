@@ -222,37 +222,6 @@ struct HanimeHomePage: Hashable, Sendable {
     let sections: [HanimeHomeSection]
 }
 
-struct HanimePreviewPage: Hashable, Sendable {
-    let monthCode: String
-    let displayMonth: String
-    let headerImageURL: URL?
-    let hasPrevious: Bool
-    let hasNext: Bool
-    let latestVideos: [HanimeInfo]
-    let items: [HanimePreviewItem]
-}
-
-struct HanimePreviewItem: Identifiable, Hashable, Sendable {
-    var id: String {
-        videoCode
-            ?? videoTitle
-            ?? title
-            ?? releaseDate
-            ?? coverURL?.absoluteString
-            ?? "preview"
-    }
-
-    let title: String?
-    let videoTitle: String?
-    let coverURL: URL?
-    let introduction: String?
-    let brand: String?
-    let releaseDate: String?
-    let videoCode: String?
-    let tags: [String]
-    let relatedImageURLs: [URL]
-}
-
 struct HanimeUserProfile: Hashable, Sendable {
     let id: String
     let username: String

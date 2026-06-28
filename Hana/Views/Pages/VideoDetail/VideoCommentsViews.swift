@@ -243,10 +243,6 @@ struct HanimeCommentsSection: View {
     }
 
     private var redirectURL: String {
-        if commentType == "preview" {
-            return services.httpClient.baseURL.appendingPathComponent("previews/\(targetCode)").absoluteString
-        }
-
         var components = URLComponents(
             url: services.httpClient.baseURL.appendingPathComponent("watch"),
             resolvingAgainstBaseURL: false

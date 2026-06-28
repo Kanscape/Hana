@@ -23,6 +23,7 @@ playground.xcworkspace
 
 # Swift Package Manager
 # Package.resolved kept for reproducible builds
+.build/
 
 # Carthage
 Carthage/Build/

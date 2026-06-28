@@ -6,6 +6,7 @@ import UniformTypeIdentifiers
 struct HomeScreen: View {
     @Environment(HanaServices.self) private var services
     @State private var state: LoadableState<HanimeHomePage> = .idle
+    @State private var isDisciplineModePresented = false
 
     var body: some View {
         Group {
@@ -27,6 +28,7 @@ struct HomeScreen: View {
                             .padding(.top, 16)
                         .padding(.bottom)
                     }
+                    .hanaHomeTopScrollEdgeSoft()
                     .hanaSystemBackground()
                 }
             case .failed(let message):
@@ -41,7 +43,10 @@ struct HomeScreen: View {
         }
         .navigationTitle("Hana")
         .hanaMobileNavigationChrome()
-        .homePreviewToolbar()
+        .disciplineModeToolbar(isPresented: $isDisciplineModePresented)
+        .sheet(isPresented: $isDisciplineModePresented) {
+            DisciplineModeSetupSheet()
+        }
         .task {
             if case .idle = state {
                 await loadHome()
@@ -68,16 +73,16 @@ struct HomeScreen: View {
 
 private extension View {
     @ViewBuilder
-    func homePreviewToolbar() -> some View {
+    func disciplineModeToolbar(isPresented: Binding<Bool>) -> some View {
 #if os(macOS)
         self
 #else
         toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
-                NavigationLink {
-                    PreviewMonthScreen()
+                Button {
+                    isPresented.wrappedValue = true
                 } label: {
-                    Label("预告", systemImage: "calendar")
+                    Label("自律模式", systemImage: "calendar.badge.lock")
                 }
             }
         }

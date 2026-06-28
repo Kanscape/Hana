@@ -58,6 +58,7 @@ struct HanaApp: App {
     @UIApplicationDelegateAdaptor(HanaAppDelegate.self) private var appDelegate
 #endif
     @State private var services = HanaServices()
+    @State private var disciplineModeStore = DisciplineModeStore()
     @State private var servicesIdentity = UUID()
 
     var sharedModelContainer: ModelContainer = {
@@ -87,6 +88,7 @@ struct HanaApp: App {
             ContentView()
                 .id(servicesIdentity)
                 .environment(services)
+                .environment(disciplineModeStore)
                 .environment(\.hanaReloadServices, reloadServicesAction)
         }
         .modelContainer(sharedModelContainer)

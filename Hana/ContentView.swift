@@ -16,7 +16,9 @@ import AppKit
 
 struct ContentView: View {
     @Environment(HanaServices.self) private var services
+    @Environment(DisciplineModeStore.self) private var disciplineModeStore
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.scenePhase) private var scenePhase
     @AppStorage(HanaSettingsKey.appearanceMode) private var appearanceMode = HanaAppearanceMode.system.rawValue
 #if !os(macOS)
     @AppStorage(HanaSettingsKey.themeColor) private var themeColor = HanaThemeColor.defaultValue
@@ -42,10 +44,43 @@ struct ContentView: View {
 #endif
 
     var body: some View {
+        let content = Group {
+            if disciplineModeStore.isLocked {
+                DisciplineModeLockScreen()
+            } else {
+                unlockedAppContent
+            }
+        }
+        .task {
+            await monitorDisciplineMode()
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active {
+                disciplineModeStore.refresh()
+            }
+        }
+        .tint(appThemeColor)
+        .accentColor(appThemeColor)
+
+#if os(macOS)
+        content
+            .onAppear {
+                applyMacOSAppearance()
+            }
+            .onChange(of: appearanceMode) { _, _ in
+                applyMacOSAppearance()
+            }
+#else
+        content
+            .preferredColorScheme(HanaAppearanceMode(rawValue: appearanceMode)?.colorScheme)
+#endif
+    }
+
+    private var unlockedAppContent: some View {
         @Bindable var siteSession = services.siteSession
         @Bindable var updateChecker = services.updateChecker
 
-        let appContent = rootContent
+        return rootContent
             .sheet(item: $siteSession.activeFlow) { flow in
                 SiteWebSessionSheet(
                     flow: flow,
@@ -63,21 +98,6 @@ struct ContentView: View {
                 await services.updateChecker.checkAutomaticallyIfNeeded()
             }
             .hanaUpdateAlert(update: $updateChecker.availableUpdate)
-            .tint(appThemeColor)
-            .accentColor(appThemeColor)
-
-#if os(macOS)
-        appContent
-            .onAppear {
-                applyMacOSAppearance()
-            }
-            .onChange(of: appearanceMode) { _, _ in
-                applyMacOSAppearance()
-            }
-#else
-        appContent
-            .preferredColorScheme(HanaAppearanceMode(rawValue: appearanceMode)?.colorScheme)
-#endif
     }
 
 #if os(macOS)
@@ -261,6 +281,17 @@ struct ContentView: View {
             records: downloadQueue
         )
     }
+
+    private func monitorDisciplineMode() async {
+        while !Task.isCancelled {
+            disciplineModeStore.refresh()
+            do {
+                try await Task.sleep(for: .seconds(30))
+            } catch {
+                return
+            }
+        }
+    }
 }
 
 #if os(macOS)
@@ -405,6 +436,7 @@ private extension View {
 #Preview {
     ContentView()
         .environment(HanaServices())
+        .environment(DisciplineModeStore())
         .modelContainer(
             for: [
                 WatchHistoryRecord.self,

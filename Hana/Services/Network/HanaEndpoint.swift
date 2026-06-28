@@ -49,10 +49,6 @@ struct HanaEndpoint: Hashable, Sendable {
         ])
     }
 
-    static func previews(monthCode: String) -> HanaEndpoint {
-        HanaEndpoint(path: "previews/\(monthCode)")
-    }
-
     static func accountList(userID: String, kind: HanimeMyListKind, page: Int = 1) -> HanaEndpoint {
         HanaEndpoint(path: "user/\(userID)/\(kind.rawValue)", queryItems: [
             URLQueryItem(name: "page", value: String(page))

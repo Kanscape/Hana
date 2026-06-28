@@ -30,6 +30,7 @@ enum HanaSettingsKey {
     static let autoCheckForUpdates = "hana.settings.autoCheckForUpdates"
     static let lastUpdateCheckDate = "hana.settings.lastUpdateCheckDate"
     static let updateLinkDestination = "hana.settings.updateLinkDestination"
+    static let disciplineModeConfiguration = "hana.settings.disciplineModeConfiguration"
 }
 
 enum HanaSiteBaseURL {

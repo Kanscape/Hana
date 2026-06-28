@@ -117,6 +117,7 @@ struct HomeHeroContentTransition: View {
                     .zIndex(1)
                 }
             }
+            .hanaHomeTopScrollEdgeSoft()
             .scrollIndicators(.hidden)
             .background(pageBackground)
             .onScrollGeometryChange(for: CGFloat.self) { geometry in
