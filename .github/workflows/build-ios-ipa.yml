@@ -41,6 +41,10 @@ jobs:
             BUILD_NUMBER="$(git rev-list --count HEAD)"
             BUILD_CHANNEL="main"
             BUILD_LABEL="Build $BUILD_NUMBER"
+          elif [[ "$GITHUB_REF_NAME" == v* ]]; then
+            BUILD_NUMBER="$(git rev-list --count HEAD)"
+            BUILD_CHANNEL="tag"
+            BUILD_LABEL="$GITHUB_REF_NAME"
           else
             BUILD_NUMBER="$(git rev-list --count origin/main)"
             BUILD_CHANNEL="branch"
