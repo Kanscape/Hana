@@ -116,6 +116,8 @@ jobs:
             -format UDZO \
             "$dmg_path"
 
+          sync
+          sleep 5
           hdiutil verify "$dmg_path"
 
       - name: Upload unsigned DMG
