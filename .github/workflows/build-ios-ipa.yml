@@ -71,15 +71,10 @@ jobs:
         run: |
           set -euo pipefail
 
-          short_sha="$(git rev-parse --short=7 HEAD)"
           build_dir="$PWD/build"
           archive_path="$build_dir/Unsigned.xcarchive"
           payload_path="$build_dir/Payload"
           artifact_dir="$PWD/artifacts"
-          ipa_name="Hana-iOS-0.1.0-${BUILD_NUMBER}-unsigned.ipa"
-          zip_name="Hana-iOS-0.1.0-${BUILD_NUMBER}-unsigned.zip"
-          ipa_path="$artifact_dir/$ipa_name"
-          zip_path="$artifact_dir/$zip_name"
 
           rm -rf "$archive_path" "$payload_path" "$artifact_dir"
           mkdir -p "$payload_path" "$artifact_dir"
@@ -103,6 +98,12 @@ jobs:
             echo "No .app found under $archive_path/Products/Applications"
             exit 1
           fi
+
+          marketing_version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app_path/Info.plist")"
+          ipa_name="Hana-iOS-${marketing_version}-${BUILD_NUMBER}-unsigned.ipa"
+          zip_name="Hana-iOS-${marketing_version}-${BUILD_NUMBER}-unsigned.zip"
+          ipa_path="$artifact_dir/$ipa_name"
+          zip_path="$artifact_dir/$zip_name"
 
           cp -R "$app_path" "$payload_path/"
 

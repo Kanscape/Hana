@@ -75,7 +75,6 @@ jobs:
           products_path="$derived_data_path/Build/Products"
           staging_dir="$PWD/build/dmg-staging"
           artifact_dir="$PWD/artifacts"
-          dmg_path="$artifact_dir/Hana-macOS-0.1.0-${BUILD_NUMBER}-unsigned.dmg"
 
           rm -rf "$derived_data_path" "$staging_dir" "$artifact_dir"
           mkdir -p "$staging_dir" "$artifact_dir"
@@ -99,6 +98,9 @@ jobs:
             echo "No ${SCHEME}.app found under $products_path"
             exit 1
           fi
+
+          marketing_version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app_path/Contents/Info.plist")"
+          dmg_path="$artifact_dir/Hana-macOS-${marketing_version}-${BUILD_NUMBER}-unsigned.dmg"
 
           ditto "$app_path" "$staging_dir/${SCHEME}.app"
           ln -s /Applications "$staging_dir/Applications"
