@@ -25,6 +25,37 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set Build Metadata
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin main:refs/remotes/origin/main
+
+          if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
+            BUILD_NUMBER="$(git rev-list --count origin/main)"
+            BUILD_CHANNEL="pr"
+            BUILD_LABEL="PR #${{ github.event.pull_request.number }}"
+          elif [ "$GITHUB_REF_NAME" = "main" ]; then
+            BUILD_NUMBER="$(git rev-list --count HEAD)"
+            BUILD_CHANNEL="main"
+            BUILD_LABEL="Build $BUILD_NUMBER"
+          elif [[ "$GITHUB_REF_NAME" == v* ]]; then
+            BUILD_NUMBER="$(git rev-list --count HEAD)"
+            BUILD_CHANNEL="tag"
+            BUILD_LABEL="$GITHUB_REF_NAME"
+          else
+            BUILD_NUMBER="$(git rev-list --count origin/main)"
+            BUILD_CHANNEL="branch"
+            BUILD_LABEL="$GITHUB_REF_NAME"
+          fi
+
+          {
+            echo "BUILD_NUMBER=$BUILD_NUMBER"
+            echo "BUILD_CHANNEL=$BUILD_CHANNEL"
+            echo "BUILD_LABEL=$BUILD_LABEL"
+          } >> "$GITHUB_ENV"
 
       - name: Select Xcode
         run: |
@@ -36,17 +67,18 @@ jobs:
         run: |
           xcodebuild -version
           xcodebuild -showsdks
+          echo "BUILD_NUMBER=$BUILD_NUMBER"
+          echo "BUILD_CHANNEL=$BUILD_CHANNEL"
+          echo "BUILD_LABEL=$BUILD_LABEL"
 
       - name: Build unsigned DMG
         run: |
           set -euo pipefail
 
-          short_sha="$(git rev-parse --short=7 HEAD)"
           derived_data_path="$PWD/build/DerivedData-macOS"
           products_path="$derived_data_path/Build/Products"
           staging_dir="$PWD/build/dmg-staging"
           artifact_dir="$PWD/artifacts"
-          dmg_path="$artifact_dir/Hana-macOS-${short_sha}-unsigned.dmg"
 
           rm -rf "$derived_data_path" "$staging_dir" "$artifact_dir"
           mkdir -p "$staging_dir" "$artifact_dir"
@@ -57,6 +89,9 @@ jobs:
             -configuration Release \
             -destination "generic/platform=macOS" \
             -derivedDataPath "$derived_data_path" \
+            CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
+            HANA_BUILD_CHANNEL="$BUILD_CHANNEL" \
+            HANA_BUILD_LABEL="$BUILD_LABEL" \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO
@@ -68,6 +103,9 @@ jobs:
             exit 1
           fi
 
+          marketing_version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app_path/Contents/Info.plist")"
+          dmg_path="$artifact_dir/Hana-macOS-${marketing_version}-${BUILD_NUMBER}-unsigned.dmg"
+
           ditto "$app_path" "$staging_dir/${SCHEME}.app"
           ln -s /Applications "$staging_dir/Applications"
 
@@ -78,6 +116,8 @@ jobs:
             -format UDZO \
             "$dmg_path"
 
+          sync
+          sleep 5
           hdiutil verify "$dmg_path"
 
       - name: Upload unsigned DMG

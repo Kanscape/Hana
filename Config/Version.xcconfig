@@ -1,0 +1,4 @@
+// Local defaults — CI overrides via xcodebuild command line
+HANA_BUILD_CHANNEL = local
+HANA_BUILD_LABEL = Local Build
+CURRENT_PROJECT_VERSION = 1
