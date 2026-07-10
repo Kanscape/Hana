@@ -547,6 +547,13 @@ private struct AboutSettingsScreen: View {
         Form {
             Section {
                 SettingsAppFooter()
+                    .contentShape(Rectangle())
+                    .onLongPressGesture {
+                        let displayVersion = SettingsAppFooter.displayVersionText
+                        guard !displayVersion.isEmpty else { return }
+                        HanaPasteboard.string = displayVersion
+                        toastMessage = .info("已复制版本号")
+                    }
             }
 
             Section {

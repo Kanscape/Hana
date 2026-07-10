@@ -8,6 +8,10 @@ typealias SettingsPlatformImage = NSImage
 #endif
 
 struct SettingsAppFooter: View {
+    static var displayVersionText: String {
+        SettingsAppInfo.displayVersionText
+    }
+
     private let appInfo = SettingsAppInfo.current
 
     var body: some View {
@@ -58,12 +62,17 @@ private struct SettingsAppInfo {
             ?? bundle.localizedStringValue(for: "CFBundleName")
             ?? ProcessInfo.processInfo.processName
         let version = bundle.localizedStringValue(for: "CFBundleShortVersionString") ?? ""
+        let displayVersion = AppBuildInfo.displayVersion(baseVersion: version)
 
         return SettingsAppInfo(
             name: name,
-            versionText: version.isEmpty ? "版本未知" : "版本 \(version)",
+            versionText: displayVersion.isEmpty ? "版本未知" : displayVersion,
             icon: primaryIcon(in: bundle)
         )
+    }
+
+    static var displayVersionText: String {
+        current.versionText == "版本未知" ? "" : current.versionText
     }
 
     private static func primaryIcon(in bundle: Bundle) -> SettingsPlatformImage? {
