@@ -153,6 +153,10 @@ struct VideoDetailScreen: View {
 
     @ViewBuilder
     private func detailSections(_ video: HanimeVideo) -> some View {
+        if let series = video.series {
+            VideoSeriesSection(series: series)
+        }
+
         if let originalComicURL = video.originalComicURL {
             DetailSection(title: "原作漫画") {
                 Link(destination: originalComicURL) {

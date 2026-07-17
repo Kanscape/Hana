@@ -11,6 +11,11 @@
 		F44DB4932FB760000C55FF9 /* Nuke in Frameworks */ = {isa = PBXBuildFile; productRef = F44DB4952FB760000C55FF9 /* Nuke */; };
 		F44DB4942FB760000C55FF9 /* NukeUI in Frameworks */ = {isa = PBXBuildFile; productRef = F44DB4962FB760000C55FF9 /* NukeUI */; };
 		F44DB4A92FB762000C55FF9 /* AppBuildInfoTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F44DB4A12FB762000C55FF9 /* AppBuildInfoTests.swift */; };
+		F44DB4C52FB780000C55FF9 /* HanimeSeriesParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F44DB4C02FB780000C55FF9 /* HanimeSeriesParserTests.swift */; };
+		F44DB4C62FB780000C55FF9 /* series-playlist-new.html in Resources */ = {isa = PBXBuildFile; fileRef = F44DB4C12FB780000C55FF9 /* series-playlist-new.html */; };
+		F44DB4C72FB780000C55FF9 /* series-playlist-legacy.html in Resources */ = {isa = PBXBuildFile; fileRef = F44DB4C22FB780000C55FF9 /* series-playlist-legacy.html */; };
+		F44DB4C82FB780000C55FF9 /* series-playlist-edge-cases.html in Resources */ = {isa = PBXBuildFile; fileRef = F44DB4C32FB780000C55FF9 /* series-playlist-edge-cases.html */; };
+		F44DB4C92FB780000C55FF9 /* video-without-series.html in Resources */ = {isa = PBXBuildFile; fileRef = F44DB4C42FB780000C55FF9 /* video-without-series.html */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -28,6 +33,11 @@
 		F44DB4982FB761000C55FF9 /* Version.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Version.xcconfig; sourceTree = "<group>"; };
 		F44DB4A02FB762000C55FF9 /* HanaTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = HanaTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		F44DB4A12FB762000C55FF9 /* AppBuildInfoTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppBuildInfoTests.swift; sourceTree = "<group>"; };
+		F44DB4C02FB780000C55FF9 /* HanimeSeriesParserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HanimeSeriesParserTests.swift; sourceTree = "<group>"; };
+		F44DB4C12FB780000C55FF9 /* series-playlist-new.html */ = {isa = PBXFileReference; lastKnownFileType = text.html; path = "series-playlist-new.html"; sourceTree = "<group>"; };
+		F44DB4C22FB780000C55FF9 /* series-playlist-legacy.html */ = {isa = PBXFileReference; lastKnownFileType = text.html; path = "series-playlist-legacy.html"; sourceTree = "<group>"; };
+		F44DB4C32FB780000C55FF9 /* series-playlist-edge-cases.html */ = {isa = PBXFileReference; lastKnownFileType = text.html; path = "series-playlist-edge-cases.html"; sourceTree = "<group>"; };
+		F44DB4C42FB780000C55FF9 /* video-without-series.html */ = {isa = PBXFileReference; lastKnownFileType = text.html; path = "video-without-series.html"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -81,8 +91,21 @@
 			isa = PBXGroup;
 			children = (
 				F44DB4A12FB762000C55FF9 /* AppBuildInfoTests.swift */,
+				F44DB4C02FB780000C55FF9 /* HanimeSeriesParserTests.swift */,
+				F44DB4CA2FB780000C55FF9 /* Fixtures */,
 			);
 			path = HanaTests;
+			sourceTree = "<group>";
+		};
+		F44DB4CA2FB780000C55FF9 /* Fixtures */ = {
+			isa = PBXGroup;
+			children = (
+				F44DB4C12FB780000C55FF9 /* series-playlist-new.html */,
+				F44DB4C22FB780000C55FF9 /* series-playlist-legacy.html */,
+				F44DB4C32FB780000C55FF9 /* series-playlist-edge-cases.html */,
+				F44DB4C42FB780000C55FF9 /* video-without-series.html */,
+			);
+			path = Fixtures;
 			sourceTree = "<group>";
 		};
 		F44DB4992FB761000C55FF9 /* Config */ = {
@@ -199,6 +222,10 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				F44DB4C62FB780000C55FF9 /* series-playlist-new.html in Resources */,
+				F44DB4C72FB780000C55FF9 /* series-playlist-legacy.html in Resources */,
+				F44DB4C82FB780000C55FF9 /* series-playlist-edge-cases.html in Resources */,
+				F44DB4C92FB780000C55FF9 /* video-without-series.html in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -217,6 +244,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				F44DB4A92FB762000C55FF9 /* AppBuildInfoTests.swift in Sources */,
+				F44DB4C52FB780000C55FF9 /* HanimeSeriesParserTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

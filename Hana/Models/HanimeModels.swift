@@ -339,6 +339,30 @@ struct HanimeVideoListState: Hashable, Sendable {
     var playlists: [Playlist]
 }
 
+struct HanimeVideoSeries: Hashable, Sendable {
+    let title: String?
+    let videos: [HanimeSeriesVideo]
+
+    var currentVideoCode: String? {
+        videos.first(where: \.isCurrent)?.videoCode
+    }
+}
+
+struct HanimeSeriesVideo: Identifiable, Hashable, Sendable {
+    var id: String { videoCode }
+
+    let videoCode: String
+    let title: String
+    let coverURL: URL?
+    let duration: String?
+    let views: String?
+    let rating: String?
+    let author: String?
+    let category: String?
+    let uploadTime: String?
+    let isCurrent: Bool
+}
+
 struct ResolutionLink: Identifiable, Hashable, Sendable {
     var id: String { "\(quality)-\(url.absoluteString)" }
 
@@ -360,6 +384,7 @@ struct HanimeVideo: Identifiable, Hashable, Sendable {
     let tags: [String]
     let resolutions: [ResolutionLink]
     let relatedVideos: [HanimeInfo]
+    let series: HanimeVideoSeries?
     let originalComicURL: URL?
     let favoriteCount: Int?
     let isFavorite: Bool
