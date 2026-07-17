@@ -70,11 +70,31 @@ nonisolated struct HanimeDownloadManifestItem: Codable, Identifiable, Sendable {
     var completedAt: Date
 }
 
-nonisolated private struct HanimeDownloadFileStore {
+nonisolated struct HanimeDownloadFileStore {
     let fileManager: FileManager
+    private let externalDirectoryResolver: () throws -> URL?
+    private let defaultDownloadsRootURLOverride: ((Bool) throws -> URL)?
+    private let startAccessingExternalDirectory: (URL) -> Bool
+    private let stopAccessingExternalDirectory: (URL) -> Void
 
-    init(fileManager: FileManager = .default) {
+    init(
+        fileManager: FileManager = .default,
+        externalDirectoryResolver: @escaping () throws -> URL? = {
+            try HanaDownloadDirectoryPreference.resolvedExternalDirectory()
+        },
+        defaultDownloadsRootURL: ((Bool) throws -> URL)? = nil,
+        startAccessingExternalDirectory: @escaping (URL) -> Bool = {
+            $0.startAccessingSecurityScopedResource()
+        },
+        stopAccessingExternalDirectory: @escaping (URL) -> Void = {
+            $0.stopAccessingSecurityScopedResource()
+        }
+    ) {
         self.fileManager = fileManager
+        self.externalDirectoryResolver = externalDirectoryResolver
+        self.defaultDownloadsRootURLOverride = defaultDownloadsRootURL
+        self.startAccessingExternalDirectory = startAccessingExternalDirectory
+        self.stopAccessingExternalDirectory = stopAccessingExternalDirectory
     }
 
     func moveDownloadedFile(
@@ -178,14 +198,15 @@ nonisolated private struct HanimeDownloadFileStore {
     }
 
     func exportDefaultDownloadsToExternalDirectory() throws -> Int {
-        guard HanaDownloadDirectoryPreference.resolvedExternalDirectory() != nil else {
-            return 0
+        guard let externalURL = try externalDirectoryResolver() else {
+            throw HanaDownloadDirectoryError.directoryNotConfigured
         }
         let sourceURL = try defaultDownloadsRootURL(create: false)
         guard fileManager.fileExists(atPath: sourceURL.path) else {
             return 0
         }
-        return try withDownloadsRootURL(create: true) { destinationURL in
+        return try withExternalDirectoryAccess(externalURL) {
+            let destinationURL = externalURL.appending(path: "HanaDownloads", directoryHint: .isDirectory)
             guard sourceURL.standardizedFileURL != destinationURL.standardizedFileURL else {
                 return 0
             }
@@ -194,22 +215,17 @@ nonisolated private struct HanimeDownloadFileStore {
     }
 
     func importExternalDownloadsToDefaultDirectory() throws -> Int {
-        guard let externalURL = HanaDownloadDirectoryPreference.resolvedExternalDirectory() else {
-            return 0
+        guard let externalURL = try externalDirectoryResolver() else {
+            throw HanaDownloadDirectoryError.directoryNotConfigured
         }
-        let didStartAccessing = externalURL.startAccessingSecurityScopedResource()
-        defer {
-            if didStartAccessing {
-                externalURL.stopAccessingSecurityScopedResource()
+        return try withExternalDirectoryAccess(externalURL) {
+            let sourceURL = externalURL.appending(path: "HanaDownloads", directoryHint: .isDirectory)
+            guard fileManager.fileExists(atPath: sourceURL.path) else {
+                return 0
             }
+            let destinationURL = try defaultDownloadsRootURL(create: true)
+            return try copyDirectoryContents(from: sourceURL, to: destinationURL)
         }
-
-        let sourceURL = externalURL.appending(path: "HanaDownloads", directoryHint: .isDirectory)
-        guard fileManager.fileExists(atPath: sourceURL.path) else {
-            return 0
-        }
-        let destinationURL = try defaultDownloadsRootURL(create: true)
-        return try copyDirectoryContents(from: sourceURL, to: destinationURL)
     }
 
     private func destinationURL(
@@ -223,18 +239,14 @@ nonisolated private struct HanimeDownloadFileStore {
     }
 
     private func withDownloadsRootURL<T>(create: Bool, _ body: (URL) throws -> T) throws -> T {
-        if let externalURL = HanaDownloadDirectoryPreference.resolvedExternalDirectory() {
-            let didStartAccessing = externalURL.startAccessingSecurityScopedResource()
-            defer {
-                if didStartAccessing {
-                    externalURL.stopAccessingSecurityScopedResource()
+        if let externalURL = try externalDirectoryResolver() {
+            return try withExternalDirectoryAccess(externalURL) {
+                let downloadsURL = externalURL.appending(path: "HanaDownloads", directoryHint: .isDirectory)
+                if create {
+                    try fileManager.createDirectory(at: downloadsURL, withIntermediateDirectories: true)
                 }
+                return try body(downloadsURL)
             }
-            let downloadsURL = externalURL.appending(path: "HanaDownloads", directoryHint: .isDirectory)
-            if create {
-                try fileManager.createDirectory(at: downloadsURL, withIntermediateDirectories: true)
-            }
-            return try body(downloadsURL)
         }
 
         let downloadsURL = try defaultDownloadsRootURL(create: create)
@@ -242,19 +254,24 @@ nonisolated private struct HanimeDownloadFileStore {
     }
 
     private func withConfiguredDownloadDirectoryAccess<T>(_ body: () throws -> T) throws -> T {
-        guard let externalURL = HanaDownloadDirectoryPreference.resolvedExternalDirectory() else {
+        guard let externalURL = try externalDirectoryResolver() else {
             return try body()
         }
-        let didStartAccessing = externalURL.startAccessingSecurityScopedResource()
-        defer {
-            if didStartAccessing {
-                externalURL.stopAccessingSecurityScopedResource()
-            }
+        return try withExternalDirectoryAccess(externalURL, body)
+    }
+
+    private func withExternalDirectoryAccess<T>(_ url: URL, _ body: () throws -> T) throws -> T {
+        guard startAccessingExternalDirectory(url) else {
+            throw HanaDownloadDirectoryError.accessDenied
         }
+        defer { stopAccessingExternalDirectory(url) }
         return try body()
     }
 
     private func defaultDownloadsRootURL(create: Bool) throws -> URL {
+        if let defaultDownloadsRootURLOverride {
+            return try defaultDownloadsRootURLOverride(create)
+        }
         let rootURL = try fileManager.url(
             for: .applicationSupportDirectory,
             in: .userDomainMask,
