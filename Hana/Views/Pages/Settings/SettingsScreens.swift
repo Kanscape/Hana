@@ -1163,7 +1163,7 @@ private struct NetworkSettingsScreen: View {
                     Label("站点验证", systemImage: "shield")
                 }
                 Button(role: .destructive) {
-                    services.logout()
+                    Task { await services.logout() }
                 } label: {
                     Label("清除站点登录状态", systemImage: "trash")
                 }
