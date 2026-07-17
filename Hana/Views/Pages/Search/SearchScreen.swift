@@ -205,8 +205,7 @@ struct SearchScreen: View {
     }
 
     private func mergedVideos(_ current: [HanimeInfo], _ next: [HanimeInfo]) -> [HanimeInfo] {
-        var seen = Set(current.map(\.videoCode))
-        return current + next.filter { seen.insert($0.videoCode).inserted }
+        (current + next).deduplicatedByVideoCode()
     }
 
     private func loadNextSearchPageIfNeeded() {

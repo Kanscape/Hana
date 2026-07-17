@@ -264,6 +264,13 @@ struct HanimeInfo: Identifiable, Hashable, Sendable {
     ]
 }
 
+extension Sequence where Element == HanimeInfo {
+    func deduplicatedByVideoCode() -> [HanimeInfo] {
+        var seen = Set<String>()
+        return filter { seen.insert($0.videoCode).inserted }
+    }
+}
+
 struct HanimeAccountVideoList: Hashable, Sendable {
     let videos: [HanimeInfo]
     let description: String?
