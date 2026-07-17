@@ -1306,6 +1306,8 @@ private struct SiteLatencyResult: Identifiable, Hashable {
 
 private struct LocalDataSettingsScreen: View {
     @Environment(HanaServices.self) private var services
+    @Environment(DisciplineModeStore.self) private var disciplineModeStore
+    @Environment(\.hanaReloadServices) private var reloadServices
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \SearchHistoryRecord.createdAt, order: .reverse) private var searchHistory: [SearchHistoryRecord]
     @Query(sort: \AdvancedSearchHistoryRecord.createdAt, order: .reverse) private var advancedSearchHistory: [AdvancedSearchHistoryRecord]
@@ -1314,9 +1316,38 @@ private struct LocalDataSettingsScreen: View {
     @Query(sort: \HKeyframeRecord.updatedAt, order: .reverse) private var hKeyframeRecords: [HKeyframeRecord]
     @State private var pendingDeletion: LocalDataDeletionTarget?
     @State private var toastMessage: HanaToastMessage?
+    @State private var alertMessage: HanaAlertMessage?
+    @State private var exportDocument: HanaBackupDocument?
+    @State private var isExporterPresented = false
+    @State private var isImporterPresented = false
+    @State private var isProcessingBackup = false
 
     var body: some View {
         Form {
+            Section("备份与恢复") {
+                Button {
+                    prepareBackupExport()
+                } label: {
+                    Label("导出备份", systemImage: "square.and.arrow.up")
+                }
+                .disabled(isProcessingBackup)
+
+                Button {
+                    isImporterPresented = true
+                } label: {
+                    Label("恢复备份", systemImage: "square.and.arrow.down")
+                }
+                .disabled(isProcessingBackup)
+
+                if isProcessingBackup {
+                    HStack {
+                        ProgressView()
+                        Text("处理中")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+
             Section("记录数量") {
                 LabeledContent {
                     Text("\(watchHistory.count)")
@@ -1386,6 +1417,22 @@ private struct LocalDataSettingsScreen: View {
         }
         .navigationTitle("本地数据")
         .hanaToast($toastMessage)
+        .hanaFeedbackAlert($alertMessage)
+        .fileExporter(
+            isPresented: $isExporterPresented,
+            document: exportDocument,
+            contentType: .hanaBackup,
+            defaultFilename: backupFilename
+        ) { result in
+            handleBackupExport(result)
+        }
+        .fileImporter(
+            isPresented: $isImporterPresented,
+            allowedContentTypes: HanaBackupDocument.readableContentTypes,
+            allowsMultipleSelection: false
+        ) { result in
+            handleBackupImport(result)
+        }
         .confirmationDialog(
             pendingDeletion?.confirmationTitle ?? "删除数据",
             isPresented: deletionDialogBinding,
@@ -1412,6 +1459,13 @@ private struct LocalDataSettingsScreen: View {
             + advancedSearchHistory.count
             + downloadQueue.count
             + hKeyframeRecords.count
+    }
+
+    private var backupFilename: String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyyMMdd-HHmmss"
+        return "Hana-Backup-\(formatter.string(from: .now)).hanabackup"
     }
 
     private var deletionDialogBinding: Binding<Bool> {
@@ -1447,6 +1501,88 @@ private struct LocalDataSettingsScreen: View {
         try? modelContext.save()
         toastMessage = .success("\(target.title)已删除")
         pendingDeletion = nil
+    }
+
+    private func prepareBackupExport() {
+        isProcessingBackup = true
+        Task {
+            defer { isProcessingBackup = false }
+            do {
+                let archive = try HanaBackupService.makeArchive(modelContext: modelContext)
+                let data = try await HanaBackupCodec.shared.encode(archive)
+                exportDocument = HanaBackupDocument(data: data)
+                isExporterPresented = true
+            } catch is CancellationError {
+                return
+            } catch {
+                alertMessage = .error(error.localizedDescription)
+            }
+        }
+    }
+
+    private func handleBackupExport(_ result: Result<URL, Error>) {
+        exportDocument = nil
+        switch result {
+        case .success:
+            toastMessage = .success("备份已导出")
+        case .failure(let error) where isUserCancellation(error):
+            break
+        case .failure(let error):
+            alertMessage = .error(error.localizedDescription)
+        }
+    }
+
+    private func handleBackupImport(_ result: Result<[URL], Error>) {
+        switch result {
+        case .failure(let error) where isUserCancellation(error):
+            return
+        case .failure(let error):
+            alertMessage = .error(error.localizedDescription)
+            return
+        case .success(let urls):
+            guard let url = urls.first else { return }
+            restoreBackup(from: url)
+        }
+    }
+
+    private func restoreBackup(from url: URL) {
+        isProcessingBackup = true
+        Task {
+            defer { isProcessingBackup = false }
+            do {
+                guard !services.downloadClient.hasActiveDownloads else {
+                    throw HanaBackupError.activeDownloads
+                }
+                let previousBaseURL = services.httpClient.baseURL
+                let archive = try await HanaBackupCodec.shared.readArchive(from: url)
+                let summary = try HanaBackupService.importArchive(
+                    archive,
+                    modelContext: modelContext
+                )
+                let records = try modelContext.fetch(FetchDescriptor<DownloadQueueRecord>())
+                await HanaDownloadRecordSynchronizer.synchronize(
+                    downloadClient: services.downloadClient,
+                    modelContext: modelContext,
+                    records: records
+                )
+                disciplineModeStore.reload()
+                if let normalizedBaseURL = HanaSiteBaseURL.normalized(archive.settings.siteBaseURL),
+                   let restoredBaseURL = URL(string: normalizedBaseURL),
+                   restoredBaseURL != previousBaseURL {
+                    reloadServices(restoredBaseURL)
+                }
+                toastMessage = .success(summary.message)
+            } catch is CancellationError {
+                return
+            } catch {
+                alertMessage = .error(error.localizedDescription)
+            }
+        }
+    }
+
+    private func isUserCancellation(_ error: Error) -> Bool {
+        let nsError = error as NSError
+        return nsError.domain == NSCocoaErrorDomain && nsError.code == NSUserCancelledError
     }
 
     private func deleteDownloadFiles() {

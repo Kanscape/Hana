@@ -55,6 +55,11 @@ final class DisciplineModeStore {
         )
     }
 
+    func reload() {
+        configuration = Self.loadConfiguration(defaults: defaults, decoder: decoder)
+        refresh()
+    }
+
     private static func loadConfiguration(defaults: UserDefaults, decoder: JSONDecoder) -> DisciplineModeConfiguration? {
         guard let data = defaults.data(forKey: HanaSettingsKey.disciplineModeConfiguration) else {
             return nil
