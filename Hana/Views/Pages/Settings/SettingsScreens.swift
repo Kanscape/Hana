@@ -1477,8 +1477,7 @@ private struct LocalDataSettingsScreen: View {
         for item in downloadQueue {
             services.downloadClient.cancel(id: item.id)
             if let localFileURLString = item.localFileURLString,
-               let url = URL(string: localFileURLString),
-               FileManager.default.fileExists(atPath: url.path) {
+               let url = URL(string: localFileURLString) {
                 do {
                     try services.downloadClient.deleteLocalDownload(fileURL: url)
                 } catch {

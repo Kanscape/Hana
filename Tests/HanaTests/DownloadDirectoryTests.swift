@@ -199,6 +199,29 @@ struct DownloadDirectoryTests {
         #expect(stopped == 1)
     }
 
+    @Test("missing download still uses scoped access and clears metadata")
+    func deleteMissingDownload() throws {
+        let fixture = try DownloadDirectoryFixture()
+        defer { fixture.remove() }
+        let fileURL = fixture.videoURL(under: fixture.externalDownloadsRoot)
+        try fixture.writeManifest(for: fileURL)
+        var started = 0
+        var stopped = 0
+        let store = fixture.makeStore(
+            startAccessing: { _ in
+                started += 1
+                return true
+            },
+            stopAccessing: { _ in stopped += 1 }
+        )
+
+        try store.deleteLocalDownload(fileURL: fileURL)
+
+        #expect(started == 1)
+        #expect(stopped == 1)
+        #expect(!fixture.fileManager.fileExists(atPath: fileURL.deletingLastPathComponent().path))
+    }
+
     private func makeDefaults() throws -> (UserDefaults, String) {
         let name = "DownloadDirectoryTests.\(UUID().uuidString)"
         return (try #require(UserDefaults(suiteName: name)), name)
@@ -258,6 +281,29 @@ private final class DownloadDirectoryFixture {
             withIntermediateDirectories: true
         )
         try data.write(to: url)
+    }
+
+    func writeManifest(for fileURL: URL) throws {
+        let folderURL = fileURL.deletingLastPathComponent()
+        try fileManager.createDirectory(at: folderURL, withIntermediateDirectories: true)
+        let manifest = HanimeDownloadManifest(
+            videoCode: "video-code",
+            title: "Video",
+            coverURLString: nil,
+            items: [
+                HanimeDownloadManifestItem(
+                    quality: "1080P",
+                    sourceURLString: "https://example.com/video.mp4",
+                    fileName: fileURL.lastPathComponent,
+                    byteCount: 5,
+                    completedAt: Date(timeIntervalSince1970: 1)
+                )
+            ]
+        )
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let data = try encoder.encode(manifest)
+        try data.write(to: folderURL.appending(path: "info.json", directoryHint: .notDirectory))
     }
 
     func videoURL(under downloadsRoot: URL) -> URL {

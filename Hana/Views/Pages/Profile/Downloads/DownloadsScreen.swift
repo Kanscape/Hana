@@ -467,8 +467,7 @@ struct DownloadsScreen: View {
 
     private func localFileURL(for item: DownloadQueueRecord) -> URL? {
         guard let localFileURLString = item.localFileURLString,
-              let url = URL(string: localFileURLString),
-              FileManager.default.fileExists(atPath: url.path) else {
+              let url = URL(string: localFileURLString) else {
             return nil
         }
         return url
