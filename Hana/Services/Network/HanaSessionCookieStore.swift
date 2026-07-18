@@ -105,6 +105,11 @@ final class HanaSessionCookieStore {
       }
     }
 
+    if let fallback = scopedFallbackCookieHeader(for: baseURL) {
+      migrateFallback(fallback, account: account, baseURL: baseURL)
+      return fallback
+    }
+
     do {
       if let data = try credentialStore.data(for: account) {
         if let header = String(data: data, encoding: .utf8), !header.isEmpty {
@@ -117,15 +122,8 @@ final class HanaSessionCookieStore {
       // Keychain read failures use the local fallback below.
     }
 
-    guard let fallback = fallbackCookieHeader(for: baseURL) else { return nil }
-    if let data = fallback.data(using: .utf8) {
-      do {
-        try credentialStore.set(data, for: account)
-        removeFallbackValues(for: baseURL)
-      } catch {
-        // Retain the fallback and retry migration on a later read.
-      }
-    }
+    guard let fallback = legacyFallbackCookieHeader(for: baseURL) else { return nil }
+    migrateFallback(fallback, account: account, baseURL: baseURL)
     return fallback
   }
 
@@ -170,10 +168,16 @@ final class HanaSessionCookieStore {
     scopedKey("cookieHeaderInvalidated", suffix: keySuffix(for: baseURL))
   }
 
-  private func fallbackCookieHeader(for baseURL: URL) -> String? {
-    if let scoped = defaults.string(forKey: Self.fallbackKey(for: baseURL)), !scoped.isEmpty {
-      return scoped
+  private func scopedFallbackCookieHeader(for baseURL: URL) -> String? {
+    guard let fallback = defaults.string(forKey: Self.fallbackKey(for: baseURL)),
+      !fallback.isEmpty
+    else {
+      return nil
     }
+    return fallback
+  }
+
+  private func legacyFallbackCookieHeader(for baseURL: URL) -> String? {
     if Self.canReadLegacyValue(for: baseURL),
       let legacy = defaults.string(forKey: Self.legacyCookieHeaderKey),
       !legacy.isEmpty
@@ -181,6 +185,15 @@ final class HanaSessionCookieStore {
       return legacy
     }
     return nil
+  }
+
+  private func migrateFallback(_ fallback: String, account: String, baseURL: URL) {
+    do {
+      try credentialStore.set(Data(fallback.utf8), for: account)
+      removeFallbackValues(for: baseURL)
+    } catch {
+      // Retain the fallback and retry migration on a later read.
+    }
   }
 
   private func removeFallbackValues(for baseURL: URL) {

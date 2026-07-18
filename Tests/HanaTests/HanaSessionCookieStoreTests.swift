@@ -38,6 +38,30 @@ struct HanaSessionCookieStoreTests {
     #expect(store.cookieHeader(for: url) == "session=secret")
   }
 
+  @Test("a failed Keychain update prefers the newer fallback")
+  func keychainUpdateFailurePrefersFallback() throws {
+    let context = try TestContext()
+    defer { context.cleanup() }
+    let credentials = TestCredentialStore()
+    let store = HanaSessionCookieStore(credentialStore: credentials, defaults: context.defaults)
+    let url = try #require(URL(string: "https://mirror.example"))
+    let account = try #require(HanaSessionCookieStore.account(for: url))
+    let fallbackKey = HanaSessionCookieStore.fallbackKey(for: url)
+    credentials.values[account] = Data("session=old".utf8)
+    credentials.failWrites = true
+
+    store.saveCookieHeader("session=new", for: url)
+
+    #expect(credentials.values[account] == Data("session=old".utf8))
+    #expect(context.defaults.string(forKey: fallbackKey) == "session=new")
+    #expect(store.cookieHeader(for: url) == "session=new")
+
+    credentials.failWrites = false
+    #expect(store.cookieHeader(for: url) == "session=new")
+    #expect(credentials.values[account] == Data("session=new".utf8))
+    #expect(context.defaults.string(forKey: fallbackKey) == nil)
+  }
+
   @Test("uses and migrates the fallback when Keychain cannot read")
   func keychainReadFailureUsesFallback() throws {
     let context = try TestContext()
