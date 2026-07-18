@@ -769,6 +769,7 @@ final class HanimeDownloadClient {
     @ObservationIgnored private lazy var backgroundSession: URLSession = makeBackgroundSession()
     @ObservationIgnored private var backgroundEventsObserver: NSObjectProtocol?
     @ObservationIgnored private var externalDirectoryAccess: HanimeDownloadDirectoryAccess?
+    @ObservationIgnored private var externalDirectoryAccessFailure: HanaDownloadDirectoryError?
     private var activeTasks: [String: URLSessionDownloadTask] = [:]
     private var progressByID: [String: Double] = [:]
     private var continuationsByTaskID: [Int: CheckedContinuation<HanimeDownloadedFile, Error>] = [:]
@@ -786,7 +787,12 @@ final class HanimeDownloadClient {
         self.fileManager = fileManager
         self.fileStore = HanimeDownloadFileStore(fileManager: fileManager)
         self.stateStore = HanimeDownloadTaskStateStore(fileManager: fileManager)
-        self.externalDirectoryAccess = try? fileStore.beginExternalDirectoryAccess()
+        do {
+            self.externalDirectoryAccess = try fileStore.beginExternalDirectoryAccess()
+        } catch {
+            self.externalDirectoryAccess = nil
+            self.externalDirectoryAccessFailure = Self.directoryAccessError(from: error)
+        }
         self.backgroundEventsObserver = NotificationCenter.default.addObserver(
             forName: Self.backgroundEventsNotification,
             object: nil,
@@ -868,25 +874,55 @@ final class HanimeDownloadClient {
     }
 
     func deleteLocalDownload(fileURL: URL) throws {
-        try fileStore.deleteLocalDownload(fileURL: fileURL)
+        do {
+            try fileStore.deleteLocalDownload(fileURL: fileURL)
+        } catch {
+            recordDirectoryAccessFailure(from: error)
+            throw error
+        }
     }
 
     func localDownloads() throws -> [HanimeLocalDownload] {
-        try fileStore.localDownloads()
+        do {
+            return try fileStore.localDownloads()
+        } catch {
+            recordDirectoryAccessFailure(from: error)
+            throw error
+        }
     }
 
     func refreshExternalDirectoryAccess() throws {
-        let nextAccess = try fileStore.beginExternalDirectoryAccess()
-        externalDirectoryAccess?.invalidate()
-        externalDirectoryAccess = nextAccess
+        do {
+            let nextAccess = try fileStore.beginExternalDirectoryAccess()
+            externalDirectoryAccess?.invalidate()
+            externalDirectoryAccess = nextAccess
+            externalDirectoryAccessFailure = nil
+        } catch {
+            recordDirectoryAccessFailure(from: error)
+            throw error
+        }
+    }
+
+    var externalDirectoryAccessError: HanaDownloadDirectoryError? {
+        externalDirectoryAccessFailure
     }
 
     func exportDownloadsToExternalDirectory() throws -> Int {
-        try fileStore.exportDefaultDownloadsToExternalDirectory()
+        do {
+            return try fileStore.exportDefaultDownloadsToExternalDirectory()
+        } catch {
+            recordDirectoryAccessFailure(from: error)
+            throw error
+        }
     }
 
     func importDownloadsFromExternalDirectory() throws -> Int {
-        try fileStore.importExternalDownloadsToDefaultDirectory()
+        do {
+            return try fileStore.importExternalDownloadsToDefaultDirectory()
+        } catch {
+            recordDirectoryAccessFailure(from: error)
+            throw error
+        }
     }
 
     func persistedTasks() -> [HanimePersistedDownloadTask] {
@@ -945,6 +981,15 @@ final class HanimeDownloadClient {
         configuration.waitsForConnectivity = true
         configuration.timeoutIntervalForRequest = 60
         return URLSession(configuration: configuration, delegate: backgroundDelegate, delegateQueue: nil)
+    }
+
+    private func recordDirectoryAccessFailure(from error: Error) {
+        guard let directoryError = error as? HanaDownloadDirectoryError else { return }
+        externalDirectoryAccessFailure = directoryError
+    }
+
+    private static func directoryAccessError(from error: Error) -> HanaDownloadDirectoryError {
+        error as? HanaDownloadDirectoryError ?? .accessDenied
     }
 
     private func activateBackgroundSession() {
