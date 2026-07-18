@@ -59,6 +59,7 @@ struct DownloadsScreen: View {
             }
             .task {
                 await synchronizeDownloadRecords(showStatus: false)
+                await monitorDownloadSnapshots()
             }
             .alert("当前网络可能按流量计费", isPresented: mobileDataAlertBinding) {
                 Button("继续下载") {
@@ -89,7 +90,7 @@ struct DownloadsScreen: View {
                 Text("已下载或扫描到的本地视频会显示在这里。")
             } actions: {
                 Button(action: scanLocalDownloads) {
-                    Label("扫描本地文件", systemImage: "folder.badge.plus")
+                    Label("扫描本地文件", systemImage: "arrow.clockwise")
                 }
                 .buttonStyle(.borderedProminent)
             }
@@ -106,6 +107,7 @@ struct DownloadsScreen: View {
                 progressProvider: progress(for:),
                 isDownloadingProvider: isDownloading(id:),
                 onStart: startDownloadAction,
+                onPause: pauseDownload,
                 onCancel: cancelDownload,
                 onPlay: playLocalFile,
                 onDelete: delete,
@@ -153,12 +155,12 @@ struct DownloadsScreen: View {
                     }
                     .disabled(queue.isEmpty && downloadGroupNames.count <= 1)
 
-                    Button(action: scanLocalDownloads) {
-                        Label("扫描本地文件", systemImage: "folder.badge.plus")
-                    }
-
                     Button(action: toggleEditMode) {
                         Label("选择", systemImage: "checklist")
+                    }
+
+                    Button(action: scanLocalDownloads) {
+                        Label("扫描本地文件", systemImage: "arrow.clockwise")
                     }
                 }
             }
@@ -230,89 +232,57 @@ struct DownloadsScreen: View {
         localPlayback = LocalVideoPlayback(fileURL: url, title: item.title)
     }
 
-    private func startDownload(_ item: DownloadQueueRecord, retryOnFailure: Bool = true) async {
-        guard !services.downloadClient.isDownloading(id: item.id) else { return }
-        guard let mediaURL = URL(string: item.mediaURLString) else {
-            item.status = "下载失败"
-            item.errorMessage = "下载地址无效"
-            try? modelContext.save()
-            return
-        }
-
-        await HanaDownloadNotifications.requestAuthorizationIfNeeded()
-        item.status = "下载中"
-        item.errorMessage = nil
-        item.completedAt = nil
-        item.progress = 0
-        item.retryCount += 1
-        try? modelContext.save()
-
-        let request = HanimeDownloadRequest(
-            id: item.id,
-            videoCode: item.videoCode,
-            title: item.title,
-            coverURLString: item.coverURLString,
-            quality: item.quality,
-            mediaURL: mediaURL
+    private func startDownload(_ item: DownloadQueueRecord) async {
+        await HanaDownloadStarter.start(
+            item,
+            downloadClient: services.downloadClient,
+            siteSession: services.siteSession,
+            modelContext: modelContext
         )
-
-        let progressTask = Task { await syncProgress(for: item) }
-        defer { progressTask.cancel() }
-
-        do {
-            let file = try await services.downloadClient.download(request) { snapshot in
-                applyPersistedDownloadTask(snapshot, to: item)
-                try? modelContext.save()
-            }
-            item.status = "已完成"
-            item.localFileURLString = file.fileURL.absoluteString
-            item.completedAt = .now
-            item.progress = 1
-            item.downloadedByteCount = file.byteCount
-            item.expectedByteCount = file.byteCount
-            item.backgroundTaskUpdatedAt = .now
-            item.errorMessage = file.byteCount.map { ByteCountFormatStyle().format($0) }
-        } catch {
-            if services.siteSession.handle(error) {
-                item.status = "需要 Cloudflare 验证"
-            } else if let urlError = error as? URLError, urlError.code == .cancelled {
-                item.status = "已取消"
-                item.errorMessage = nil
-            } else if retryOnFailure {
-                item.status = "重试中"
-                item.errorMessage = error.localizedDescription
-                try? modelContext.save()
-                try? await Task.sleep(for: .seconds(1))
-                await startDownload(item, retryOnFailure: false)
-                return
-            } else {
-                item.status = "下载失败"
-                item.errorMessage = error.localizedDescription
-            }
-        }
-        try? modelContext.save()
     }
 
-    private func syncProgress(for item: DownloadQueueRecord) async {
+    private func monitorDownloadSnapshots() async {
         while !Task.isCancelled {
-            if let snapshot = services.downloadClient.persistedTask(id: item.id) {
-                applyPersistedDownloadTask(snapshot, to: item)
-                try? modelContext.save()
-            } else if let progress = services.downloadClient.progress(for: item.id) {
-                item.progress = progress
+            let snapshotsByID = Dictionary(
+                uniqueKeysWithValues: services.downloadClient.persistedTasks().map { ($0.id, $0) }
+            )
+            var changed = false
+            for item in queue {
+                guard let snapshot = snapshotsByID[item.id] else {
+                    continue
+                }
+                let isCurrent = item.backgroundTaskUpdatedAt == snapshot.updatedAt
+                    && item.backgroundTaskIdentifier == snapshot.taskIdentifier
+                    && item.progress == snapshot.progress
+                    && item.localFileURLString == snapshot.localFileURLString
+                    && item.completionNotificationSentAt == snapshot.notificationSentAt
+                    && item.status == HanaDownloadRecordSynchronizer.downloadStatusTitle(for: snapshot)
+                guard !isCurrent else {
+                    continue
+                }
+                HanaDownloadRecordSynchronizer.apply(snapshot, to: item)
+                changed = true
+            }
+            if changed {
                 try? modelContext.save()
             }
-            if !services.downloadClient.isDownloading(id: item.id) {
-                break
-            }
-            try? await Task.sleep(for: .milliseconds(500))
+            try? await Task.sleep(for: .seconds(1))
         }
+    }
+
+    private func pauseDownload(_ item: DownloadQueueRecord) {
+        services.downloadClient.pause(id: item.id)
+        if let snapshot = services.downloadClient.persistedTask(id: item.id) {
+            HanaDownloadRecordSynchronizer.apply(snapshot, to: item)
+        }
+        try? modelContext.save()
     }
 
     private func cancelDownload(_ item: DownloadQueueRecord) {
         services.downloadClient.cancel(id: item.id)
-        item.status = "已取消"
-        item.errorMessage = nil
+        if let snapshot = services.downloadClient.persistedTask(id: item.id) {
+            HanaDownloadRecordSynchronizer.apply(snapshot, to: item)
+        }
         try? modelContext.save()
     }
 
@@ -331,7 +301,7 @@ struct DownloadsScreen: View {
 
     private func delete(items: [DownloadQueueRecord]) {
         for item in items {
-            services.downloadClient.cancel(id: item.id)
+            services.downloadClient.remove(id: item.id)
             if let localURL = localFileURL(for: item) {
                 try? services.downloadClient.deleteLocalDownload(fileURL: localURL)
             }
@@ -402,56 +372,6 @@ struct DownloadsScreen: View {
         toastMessage = .success("已把 \(name) 中的视频移到默认分组")
     }
 
-    private func applyPersistedDownloadTask(
-        _ snapshot: HanimePersistedDownloadTask,
-        to item: DownloadQueueRecord
-    ) {
-        item.backgroundSessionIdentifier = snapshot.sessionIdentifier
-        item.backgroundTaskIdentifier = snapshot.taskIdentifier
-        item.backgroundTaskStartedAt = snapshot.createdAt
-        item.backgroundTaskUpdatedAt = snapshot.updatedAt
-        item.downloadedByteCount = snapshot.downloadedByteCount
-        item.expectedByteCount = snapshot.expectedByteCount
-        item.completionNotificationSentAt = snapshot.notificationSentAt
-        item.progress = snapshot.progress
-
-        switch snapshot.status {
-        case .running:
-            guard item.status != "已完成" else { return }
-            item.status = "下载中"
-            item.localFileURLString = nil
-            item.errorMessage = progressMessage(for: snapshot)
-            item.completedAt = nil
-        case .completed:
-            item.status = "已完成"
-            item.localFileURLString = snapshot.localFileURLString
-            item.completedAt = snapshot.completedAt ?? item.completedAt ?? .now
-            item.progress = 1
-            item.errorMessage = snapshot.downloadedByteCount.map { ByteCountFormatStyle().format($0) }
-        case .failed:
-            guard item.status != "已完成" else { return }
-            item.status = "下载失败"
-            item.errorMessage = snapshot.errorDescription
-            item.completedAt = snapshot.completedAt
-        case .cancelled:
-            guard item.status != "已完成" else { return }
-            item.status = "已取消"
-            item.errorMessage = nil
-            item.completedAt = snapshot.completedAt
-        }
-    }
-
-    private func progressMessage(for snapshot: HanimePersistedDownloadTask) -> String? {
-        guard let downloaded = snapshot.downloadedByteCount,
-              let expected = snapshot.expectedByteCount,
-              expected > 0 else {
-            return nil
-        }
-        let downloadedText = ByteCountFormatStyle().format(downloaded)
-        let expectedText = ByteCountFormatStyle().format(expected)
-        return "\(downloadedText) / \(expectedText)"
-    }
-
     private func localFileURL(for item: DownloadQueueRecord) -> URL? {
         guard let localFileURLString = item.localFileURLString,
               let url = URL(string: localFileURLString),
@@ -515,6 +435,7 @@ private struct DownloadQueueList: View {
     let progressProvider: (String) -> Double?
     let isDownloadingProvider: (String) -> Bool
     let onStart: (DownloadQueueRecord) -> Void
+    let onPause: (DownloadQueueRecord) -> Void
     let onCancel: (DownloadQueueRecord) -> Void
     let onPlay: (DownloadQueueRecord, URL) -> Void
     let onDelete: (IndexSet) -> Void
@@ -522,66 +443,80 @@ private struct DownloadQueueList: View {
     var isEditing = false
     var selectedDownloadIDs = Set<String>()
     var onToggleSelection: (String) -> Void = { _ in }
-    @State private var collapsedGroupIDs = Set<String>()
+    @AppStorage(HanaSettingsKey.collapsedDownloadGroupIDs) private var collapsedGroupIDsRawValue = "[]"
 
     var body: some View {
-        if groups.isEmpty {
-            Section {
-                ContentUnavailableView("暂无已下载视频", systemImage: "arrow.down.circle")
-            }
-        } else {
-            Section {
-                ForEach(groups) { group in
-                    DisclosureGroup(isExpanded: groupExpansionBinding(group.id)) {
-                        if isEditing {
-                            ForEach(group.items) { item in
-                                HanaSelectableRow(
-                                    isSelected: selectedDownloadIDs.contains(item.id),
-                                    accessibilityLabel: item.title
-                                ) {
-                                    onToggleSelection(item.id)
-                                } content: {
-                                    DownloadQueueSelectionRow(
+        Group {
+            if groups.isEmpty {
+                Section {
+                    ContentUnavailableView("暂无已下载视频", systemImage: "arrow.down.circle")
+                }
+            } else {
+                Section {
+                    ForEach(groups) { group in
+                        DisclosureGroup(isExpanded: groupExpansionBinding(group.id)) {
+                            if isEditing {
+                                ForEach(group.items) { item in
+                                    HanaSelectableRow(
+                                        isSelected: selectedDownloadIDs.contains(item.id),
+                                        accessibilityLabel: item.title
+                                    ) {
+                                        onToggleSelection(item.id)
+                                    } content: {
+                                        DownloadQueueSelectionRow(
+                                            item: item,
+                                            progress: progressProvider(item.id),
+                                            isDownloading: isDownloadingProvider(item.id)
+                                        )
+                                    }
+                                }
+                            } else {
+                                ForEach(group.items) { item in
+                                    DownloadQueueRow(
                                         item: item,
                                         progress: progressProvider(item.id),
-                                        isDownloading: isDownloadingProvider(item.id)
+                                        isDownloading: isDownloadingProvider(item.id),
+                                        onStart: {
+                                            onStart(item)
+                                        },
+                                        onPause: {
+                                            onPause(item)
+                                        },
+                                        onCancel: {
+                                            onCancel(item)
+                                        },
+                                        onPlay: { url in
+                                            onPlay(item, url)
+                                        },
+                                        onMoveGroup: {
+                                            onMoveGroup(item)
+                                        }
                                     )
                                 }
+                                .onDelete { offsets in
+                                    onDelete(globalOffsets(for: group, offsets: offsets))
+                                }
                             }
-                        } else {
-                            ForEach(group.items) { item in
-                                DownloadQueueRow(
-                                    item: item,
-                                    progress: progressProvider(item.id),
-                                    isDownloading: isDownloadingProvider(item.id),
-                                    onStart: {
-                                        onStart(item)
-                                    },
-                                    onCancel: {
-                                        onCancel(item)
-                                    },
-                                    onPlay: { url in
-                                        onPlay(item, url)
-                                    },
-                                    onMoveGroup: {
-                                        onMoveGroup(item)
-                                    }
-                                )
+                        } label: {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(group.title)
+                                    .lineLimit(1)
+                                Text("\(group.items.count) 个文件")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
                             }
-                            .onDelete { offsets in
-                                onDelete(globalOffsets(for: group, offsets: offsets))
-                            }
-                        }
-                    } label: {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(group.title)
-                                .lineLimit(1)
-                            Text("\(group.items.count) 个文件")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
                         }
                     }
                 }
+            }
+        }
+        .onChange(of: validGroupIDs, initial: true) { _, validGroupIDs in
+            let prunedRawValue = DownloadGroupExpansionState.pruning(
+                collapsedGroupIDsRawValue,
+                validGroupIDs: validGroupIDs
+            )
+            if prunedRawValue != collapsedGroupIDsRawValue {
+                collapsedGroupIDsRawValue = prunedRawValue
             }
         }
     }
@@ -622,15 +557,23 @@ private struct DownloadQueueList: View {
             }
     }
 
+    private var validGroupIDs: Set<String> {
+        Set(groups.map(\.id))
+    }
+
     private func groupExpansionBinding(_ id: String) -> Binding<Bool> {
         Binding {
-            !collapsedGroupIDs.contains(id)
+            !DownloadGroupExpansionState.collapsedGroupIDs(from: collapsedGroupIDsRawValue).contains(id)
         } set: { isExpanded in
+            var collapsedGroupIDs = DownloadGroupExpansionState.collapsedGroupIDs(
+                from: collapsedGroupIDsRawValue
+            )
             if isExpanded {
                 collapsedGroupIDs.remove(id)
             } else {
                 collapsedGroupIDs.insert(id)
             }
+            collapsedGroupIDsRawValue = DownloadGroupExpansionState.rawValue(for: collapsedGroupIDs)
         }
     }
 
@@ -670,14 +613,8 @@ private struct DownloadQueueSelectionRow: View {
             .font(.caption)
             .foregroundStyle(.secondary)
 
-            if item.status == "下载中" {
+            if shouldShowProgress {
                 ProgressView(value: progress ?? item.progress)
-            }
-
-            if isDownloading {
-                Text("下载中")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             }
         }
         .padding(.vertical, 4)
@@ -689,6 +626,10 @@ private struct DownloadQueueSelectionRow: View {
             "checkmark.circle"
         case "下载中":
             "arrow.down.circle"
+        case "已暂停":
+            "pause.circle"
+        case "暂时失败":
+            "wifi.exclamationmark"
         case "下载失败":
             "exclamationmark.triangle"
         case "已取消":
@@ -696,6 +637,10 @@ private struct DownloadQueueSelectionRow: View {
         default:
             "clock"
         }
+    }
+
+    private var shouldShowProgress: Bool {
+        item.status == "下载中" || (item.progress > 0 && item.status != "已完成" && item.status != "已取消")
     }
 
     private var fileSizeText: String? {
@@ -709,6 +654,7 @@ private struct DownloadQueueRow: View {
     let progress: Double?
     let isDownloading: Bool
     let onStart: () -> Void
+    let onPause: () -> Void
     let onCancel: () -> Void
     let onPlay: (URL) -> Void
     let onMoveGroup: () -> Void
@@ -730,7 +676,7 @@ private struct DownloadQueueRow: View {
             .font(.caption)
             .foregroundStyle(.secondary)
 
-            if item.status == "下载中" {
+            if shouldShowProgress {
                 if let progress {
                     ProgressView(value: progress)
                 } else {
@@ -785,6 +731,10 @@ private struct DownloadQueueRow: View {
                     }
 
                     if isDownloading {
+                        Button(action: onPause) {
+                            Label("暂停下载", systemImage: "pause.circle")
+                        }
+
                         Button(role: .cancel, action: onCancel) {
                             Label("取消下载", systemImage: "xmark.circle")
                         }
@@ -806,6 +756,10 @@ private struct DownloadQueueRow: View {
             "checkmark.circle"
         case "下载中":
             "arrow.down.circle"
+        case "已暂停":
+            "pause.circle"
+        case "暂时失败":
+            "wifi.exclamationmark"
         case "下载失败":
             "exclamationmark.triangle"
         case "已取消":
@@ -830,11 +784,29 @@ private struct DownloadQueueRow: View {
     }
 
     private var startTitle: String {
-        item.status == "下载失败" || item.status == "已取消" ? "重新下载" : "开始下载"
+        switch item.status {
+        case "已暂停", "暂时失败":
+            "继续下载"
+        case "下载失败", "已取消":
+            "重新下载"
+        default:
+            "开始下载"
+        }
     }
 
     private var startIcon: String {
-        item.status == "下载失败" || item.status == "已取消" ? "arrow.clockwise" : "arrow.down"
+        switch item.status {
+        case "已暂停", "暂时失败":
+            "play"
+        case "下载失败", "已取消":
+            "arrow.clockwise"
+        default:
+            "arrow.down"
+        }
+    }
+
+    private var shouldShowProgress: Bool {
+        item.status == "下载中" || (item.progress > 0 && item.status != "已完成" && item.status != "已取消")
     }
 
     private var canStart: Bool {

@@ -23,6 +23,8 @@ enum HanaSettingsKey {
     static let sharedHKeyframesPreferred = "hana.settings.sharedHKeyframesPreferred"
     static let defaultDownloadQuality = "hana.settings.defaultDownloadQuality"
     static let downloadConcurrency = "hana.settings.downloadConcurrency"
+    static let startDownloadsImmediately = "hana.settings.startDownloadsImmediately"
+    static let collapsedDownloadGroupIDs = "hana.settings.collapsedDownloadGroupIDs"
     static let warnBeforeMobileDataDownload = "hana.settings.warnBeforeMobileDataDownload"
     static let networkProxyMode = "hana.settings.networkProxyMode"
     static let networkProxyHost = "hana.settings.networkProxyHost"

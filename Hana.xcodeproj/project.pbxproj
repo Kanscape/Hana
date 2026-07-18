@@ -11,6 +11,7 @@
 		F44DB4932FB760000C55FF9 /* Nuke in Frameworks */ = {isa = PBXBuildFile; productRef = F44DB4952FB760000C55FF9 /* Nuke */; };
 		F44DB4942FB760000C55FF9 /* NukeUI in Frameworks */ = {isa = PBXBuildFile; productRef = F44DB4962FB760000C55FF9 /* NukeUI */; };
 		F44DB4A92FB762000C55FF9 /* AppBuildInfoTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F44DB4A12FB762000C55FF9 /* AppBuildInfoTests.swift */; };
+		F44DB4B12FB763000C55FF9 /* DownloadResumeStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F44DB4B02FB763000C55FF9 /* DownloadResumeStateTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -28,6 +29,7 @@
 		F44DB4982FB761000C55FF9 /* Version.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Version.xcconfig; sourceTree = "<group>"; };
 		F44DB4A02FB762000C55FF9 /* HanaTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = HanaTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		F44DB4A12FB762000C55FF9 /* AppBuildInfoTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppBuildInfoTests.swift; sourceTree = "<group>"; };
+		F44DB4B02FB763000C55FF9 /* DownloadResumeStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownloadResumeStateTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -69,6 +71,23 @@
 			);
 			sourceTree = "<group>";
 		};
+		F44DB4742FB7571400C55FF9 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				F44DB4732FB7571400C55FF9 /* Hana.app */,
+				F44DB4A02FB762000C55FF9 /* HanaTests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		F44DB4992FB761000C55FF9 /* Config */ = {
+			isa = PBXGroup;
+			children = (
+				F44DB4982FB761000C55FF9 /* Version.xcconfig */,
+			);
+			path = Config;
+			sourceTree = "<group>";
+		};
 		F44DB4AC2FB762000C55FF9 /* Tests */ = {
 			isa = PBXGroup;
 			children = (
@@ -81,25 +100,9 @@
 			isa = PBXGroup;
 			children = (
 				F44DB4A12FB762000C55FF9 /* AppBuildInfoTests.swift */,
+				F44DB4B02FB763000C55FF9 /* DownloadResumeStateTests.swift */,
 			);
 			path = HanaTests;
-			sourceTree = "<group>";
-		};
-		F44DB4992FB761000C55FF9 /* Config */ = {
-			isa = PBXGroup;
-			children = (
-				F44DB4982FB761000C55FF9 /* Version.xcconfig */,
-			);
-			path = Config;
-			sourceTree = "<group>";
-		};
-		F44DB4742FB7571400C55FF9 /* Products */ = {
-			isa = PBXGroup;
-			children = (
-				F44DB4732FB7571400C55FF9 /* Hana.app */,
-				F44DB4A02FB762000C55FF9 /* HanaTests.xctest */,
-			);
-			name = Products;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -217,6 +220,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				F44DB4A92FB762000C55FF9 /* AppBuildInfoTests.swift in Sources */,
+				F44DB4B12FB763000C55FF9 /* DownloadResumeStateTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -839,6 +839,7 @@ private struct DownloadSettingsScreen: View {
     @Environment(HanaServices.self) private var services
     @AppStorage(HanaSettingsKey.defaultDownloadQuality) private var defaultDownloadQuality = HanaVideoQualityPreference.defaultValue.rawValue
     @AppStorage(HanaSettingsKey.downloadConcurrency) private var downloadConcurrency = 2
+    @AppStorage(HanaSettingsKey.startDownloadsImmediately) private var startDownloadsImmediately = true
     @AppStorage(HanaSettingsKey.warnBeforeMobileDataDownload) private var warnBeforeMobileDataDownload = true
     @State private var downloadDirectoryName = HanaDownloadDirectoryPreference.displayName()
     @State private var isDirectoryImporterPresented = false
@@ -861,6 +862,9 @@ private struct DownloadSettingsScreen: View {
                     } label: {
                         Label("同时下载", systemImage: "number")
                     }
+                }
+                Toggle(isOn: $startDownloadsImmediately) {
+                    Label("加入后立刻下载", systemImage: "bolt.fill")
                 }
             }
 
@@ -918,6 +922,9 @@ private struct DownloadSettingsScreen: View {
         }
         .onAppear {
             refreshDownloadDirectoryName()
+        }
+        .onChange(of: downloadConcurrency) { _, _ in
+            services.downloadClient.downloadConcurrencyDidChange()
         }
     }
 
