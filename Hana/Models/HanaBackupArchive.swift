@@ -21,7 +21,10 @@ nonisolated struct HanaBackupArchive: Codable, Equatable, Sendable {
 
     static func encode(_ archive: HanaBackupArchive) throws -> Data {
         let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
+        encoder.dateEncodingStrategy = .custom { date, encoder in
+            var container = encoder.singleValueContainer()
+            try container.encode(iso8601String(from: date))
+        }
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
         return try encoder.encode(archive)
     }
@@ -34,13 +37,73 @@ nonisolated struct HanaBackupArchive: Codable, Equatable, Sendable {
             }
 
             let decoder = JSONDecoder()
-            decoder.dateDecodingStrategy = .iso8601
+            decoder.dateDecodingStrategy = .custom { decoder in
+                let container = try decoder.singleValueContainer()
+                let value = try container.decode(String.self)
+                guard let date = date(fromISO8601: value) else {
+                    throw DecodingError.dataCorruptedError(
+                        in: container,
+                        debugDescription: "Invalid ISO 8601 date: \(value)"
+                    )
+                }
+                return date
+            }
             return try decoder.decode(HanaBackupArchive.self, from: data)
         } catch let error as HanaBackupError {
             throw error
         } catch {
             throw HanaBackupError.invalidArchive(error.localizedDescription)
         }
+    }
+
+    private static func iso8601String(from date: Date) -> String {
+        let interval = date.timeIntervalSince1970
+        var wholeSeconds = floor(interval)
+        var nanoseconds = Int(((interval - wholeSeconds) * 1_000_000_000).rounded())
+        if nanoseconds == 1_000_000_000 {
+            wholeSeconds += 1
+            nanoseconds = 0
+        }
+
+        let base = iso8601Formatter().string(
+            from: Date(timeIntervalSince1970: wholeSeconds)
+        )
+        return "\(base.dropLast()).\(String(format: "%09d", nanoseconds))Z"
+    }
+
+    private static func date(fromISO8601 value: String) -> Date? {
+        let formatter = iso8601Formatter()
+        guard let separator = value.lastIndex(of: ".") else {
+            return formatter.date(from: value)
+        }
+
+        let fractionStart = value.index(after: separator)
+        guard
+            let zoneStart = value[fractionStart...].firstIndex(where: {
+                "Z+-".contains($0)
+            })
+        else {
+            return nil
+        }
+        let fractionText = value[fractionStart..<zoneStart]
+        guard !fractionText.isEmpty,
+              fractionText.allSatisfy(\.isNumber),
+              let fraction = Double("0.\(fractionText)") else {
+            return nil
+        }
+
+        let wholeSecondsText = String(value[..<separator]) + String(value[zoneStart...])
+        guard let wholeSecondsDate = formatter.date(from: wholeSecondsText) else {
+            return nil
+        }
+        return wholeSecondsDate.addingTimeInterval(fraction)
+    }
+
+    private static func iso8601Formatter() -> ISO8601DateFormatter {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        return formatter
     }
 }
 

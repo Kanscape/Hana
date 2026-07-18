@@ -63,6 +63,63 @@ struct HanaBackupServiceTests {
         #expect(destinationArchive == sourceArchive)
     }
 
+    @Test("preserves subsecond timestamps used for merge precedence")
+    func subsecondTimestampRoundTrip() throws {
+        let baseTimestamp = 1_700_000_000.0
+        let localDate = Date(timeIntervalSince1970: baseTimestamp + 0.1)
+        let importedDate = Date(timeIntervalSince1970: baseTimestamp + 0.9)
+        var archive = makeEmptyArchive()
+        archive.exportedAt = importedDate
+        archive.favorites = [
+            .init(
+                videoCode: "subsecond",
+                title: "Imported newer title",
+                coverURLString: nil,
+                createdAt: importedDate
+            )
+        ]
+
+        let decodedArchive = try HanaBackupArchive.decode(HanaBackupArchive.encode(archive))
+
+        #expect(decodedArchive.exportedAt == importedDate)
+        #expect(decodedArchive.favorites.first?.createdAt == importedDate)
+
+        let container = try makeContainer()
+        let context = container.mainContext
+        context.insert(
+            FavoriteVideoRecord(
+                videoCode: "subsecond",
+                title: "Local older title",
+                createdAt: localDate
+            )
+        )
+        try context.save()
+
+        let summary = try HanaBackupService.importArchive(
+            decodedArchive,
+            modelContext: context,
+            defaults: makeDefaults()
+        )
+        let favorite = try #require(
+            context.fetch(FetchDescriptor<FavoriteVideoRecord>()).first
+        )
+
+        #expect(summary.updated == 1)
+        #expect(favorite.title == "Imported newer title")
+        #expect(favorite.createdAt == importedDate)
+    }
+
+    @Test("decodes schema version 1 dates without fractional seconds")
+    func legacyWholeSecondDates() throws {
+        let archive = makeEmptyArchive()
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+
+        let decodedArchive = try HanaBackupArchive.decode(encoder.encode(archive))
+
+        #expect(decodedArchive == archive)
+    }
+
     @Test("rejects future versions and malformed JSON")
     func rejectsUnsupportedFiles() throws {
         var futureArchive = makeEmptyArchive()
