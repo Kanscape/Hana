@@ -101,6 +101,34 @@ struct DownloadDirectoryTests {
         #expect(fixture.fileManager.fileExists(atPath: fileURL.path))
     }
 
+    @Test("default download deletion ignores an invalid external bookmark")
+    func deleteDefaultDownloadWithInvalidExternalBookmark() throws {
+        let fixture = try DownloadDirectoryFixture()
+        defer { fixture.remove() }
+        try fixture.writeVideo(Data("video".utf8), under: fixture.defaultRoot)
+        let fileURL = fixture.videoURL(under: fixture.defaultRoot)
+        var externalResolutionCount = 0
+        var accessStartCount = 0
+        let store = HanimeDownloadFileStore(
+            fileManager: fixture.fileManager,
+            externalDirectoryResolver: {
+                externalResolutionCount += 1
+                throw HanaDownloadDirectoryError.staleBookmark
+            },
+            defaultDownloadsRootURL: { _ in fixture.defaultRoot },
+            startAccessingExternalDirectory: { _ in
+                accessStartCount += 1
+                return false
+            }
+        )
+
+        try store.deleteLocalDownload(fileURL: fileURL)
+
+        #expect(!fixture.fileManager.fileExists(atPath: fileURL.path))
+        #expect(externalResolutionCount == 0)
+        #expect(accessStartCount == 0)
+    }
+
     @Test("missing transfer sources return zero files")
     func emptyTransfers() throws {
         let fixture = try DownloadDirectoryFixture()

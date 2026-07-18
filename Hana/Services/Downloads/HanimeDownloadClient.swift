@@ -170,7 +170,7 @@ nonisolated struct HanimeDownloadFileStore {
     }
 
     func deleteLocalDownload(fileURL: URL) throws {
-        try withConfiguredDownloadDirectoryAccess {
+        try withDownloadFileAccess(fileURL: fileURL) {
             let folderURL = fileURL.deletingLastPathComponent()
             if fileManager.fileExists(atPath: fileURL.path) {
                 try fileManager.removeItem(at: fileURL)
@@ -253,11 +253,27 @@ nonisolated struct HanimeDownloadFileStore {
         return try body(downloadsURL)
     }
 
-    private func withConfiguredDownloadDirectoryAccess<T>(_ body: () throws -> T) throws -> T {
+    private func withDownloadFileAccess<T>(fileURL: URL, _ body: () throws -> T) throws -> T {
+        let defaultDownloadsURL = try defaultDownloadsRootURL(create: false)
+        if isDescendant(fileURL, of: defaultDownloadsURL) {
+            return try body()
+        }
+
         guard let externalURL = try externalDirectoryResolver() else {
             return try body()
         }
+        let externalDownloadsURL = externalURL.appending(path: "HanaDownloads", directoryHint: .isDirectory)
+        guard isDescendant(fileURL, of: externalDownloadsURL) else {
+            return try body()
+        }
         return try withExternalDirectoryAccess(externalURL, body)
+    }
+
+    private func isDescendant(_ fileURL: URL, of directoryURL: URL) -> Bool {
+        let fileComponents = fileURL.standardizedFileURL.pathComponents
+        let directoryComponents = directoryURL.standardizedFileURL.pathComponents
+        guard fileComponents.count > directoryComponents.count else { return false }
+        return fileComponents.prefix(directoryComponents.count).elementsEqual(directoryComponents)
     }
 
     private func withExternalDirectoryAccess<T>(_ url: URL, _ body: () throws -> T) throws -> T {
