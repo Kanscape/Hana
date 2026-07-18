@@ -16,6 +16,7 @@
 		F44DB4C72FB780000C55FF9 /* series-playlist-legacy.html in Resources */ = {isa = PBXBuildFile; fileRef = F44DB4C22FB780000C55FF9 /* series-playlist-legacy.html */; };
 		F44DB4C82FB780000C55FF9 /* series-playlist-edge-cases.html in Resources */ = {isa = PBXBuildFile; fileRef = F44DB4C32FB780000C55FF9 /* series-playlist-edge-cases.html */; };
 		F44DB4C92FB780000C55FF9 /* video-without-series.html in Resources */ = {isa = PBXBuildFile; fileRef = F44DB4C42FB780000C55FF9 /* video-without-series.html */; };
+		F44DB4CC2FB780000C55FF9 /* series-playlist-legacy-direct-anchor.html in Resources */ = {isa = PBXBuildFile; fileRef = F44DB4CB2FB780000C55FF9 /* series-playlist-legacy-direct-anchor.html */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -38,6 +39,7 @@
 		F44DB4C22FB780000C55FF9 /* series-playlist-legacy.html */ = {isa = PBXFileReference; lastKnownFileType = text.html; path = "series-playlist-legacy.html"; sourceTree = "<group>"; };
 		F44DB4C32FB780000C55FF9 /* series-playlist-edge-cases.html */ = {isa = PBXFileReference; lastKnownFileType = text.html; path = "series-playlist-edge-cases.html"; sourceTree = "<group>"; };
 		F44DB4C42FB780000C55FF9 /* video-without-series.html */ = {isa = PBXFileReference; lastKnownFileType = text.html; path = "video-without-series.html"; sourceTree = "<group>"; };
+		F44DB4CB2FB780000C55FF9 /* series-playlist-legacy-direct-anchor.html */ = {isa = PBXFileReference; lastKnownFileType = text.html; path = "series-playlist-legacy-direct-anchor.html"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -102,6 +104,7 @@
 			children = (
 				F44DB4C12FB780000C55FF9 /* series-playlist-new.html */,
 				F44DB4C22FB780000C55FF9 /* series-playlist-legacy.html */,
+				F44DB4CB2FB780000C55FF9 /* series-playlist-legacy-direct-anchor.html */,
 				F44DB4C32FB780000C55FF9 /* series-playlist-edge-cases.html */,
 				F44DB4C42FB780000C55FF9 /* video-without-series.html */,
 			);
@@ -224,6 +227,7 @@
 			files = (
 				F44DB4C62FB780000C55FF9 /* series-playlist-new.html in Resources */,
 				F44DB4C72FB780000C55FF9 /* series-playlist-legacy.html in Resources */,
+				F44DB4CC2FB780000C55FF9 /* series-playlist-legacy-direct-anchor.html in Resources */,
 				F44DB4C82FB780000C55FF9 /* series-playlist-edge-cases.html in Resources */,
 				F44DB4C92FB780000C55FF9 /* video-without-series.html in Resources */,
 			);

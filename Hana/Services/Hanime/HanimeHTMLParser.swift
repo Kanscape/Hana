@@ -457,7 +457,6 @@ struct HanimeHTMLParser {
             candidates = try newCards.compactMap(parseNewSeriesVideo)
         } else {
             candidates = try children.compactMap { element in
-                guard element.tagName() != "a" else { return nil }
                 return try parseLegacySeriesVideo(from: element)
             }
         }
@@ -499,7 +498,16 @@ struct HanimeHTMLParser {
     }
 
     private func parseLegacySeriesVideo(from element: Element) throws -> HanimeSeriesVideo? {
-        guard let href = try primaryVideoLink(in: element),
+        var href: String?
+        if element.tagName() == "a" {
+            href = try element.attr("abs:href").trimmedNonEmpty()
+                ?? element.attr("href").trimmedNonEmpty()
+        }
+        if href == nil {
+            href = try primaryVideoLink(in: element)
+        }
+
+        guard let href,
               let videoCode = videoCode(from: href) else {
             return nil
         }

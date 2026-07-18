@@ -19,6 +19,21 @@ struct HanimeSeriesParserTests {
     #expect(newSeries.currentVideoCode == "1002")
   }
 
+  @Test("legacy cards can use their own anchor href")
+  func directLegacyAnchor() throws {
+    let series = try #require(
+      parseFixture("series-playlist-legacy-direct-anchor", currentVideoCode: "9999").series)
+    let video = try #require(series.videos.first)
+
+    #expect(series.videos.count == 1)
+    #expect(video.videoCode == "4101")
+    #expect(video.title == "Direct Anchor Episode")
+    #expect(video.duration == "08:15")
+    #expect(video.views == "410 views")
+    #expect(video.rating == "91%")
+    #expect(video.isCurrent)
+  }
+
   @Test("new markup maps all available metadata")
   func newMarkupMetadata() throws {
     let series = try #require(parseFixture("series-playlist-new", currentVideoCode: "1002").series)
