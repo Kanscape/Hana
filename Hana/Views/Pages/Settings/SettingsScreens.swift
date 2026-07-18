@@ -898,9 +898,7 @@ private struct DownloadSettingsScreen: View {
                 .disabled(!HanaDownloadDirectoryPreference.hasExternalDirectoryBookmark())
 
                 Button(role: .destructive) {
-                    HanaDownloadDirectoryPreference.clear()
-                    refreshDownloadDirectoryName()
-                    toastMessage = .success("已改回应用目录")
+                    useApplicationDownloadDirectory()
                 } label: {
                     Label("使用应用目录", systemImage: "internaldrive")
                 }
@@ -932,8 +930,20 @@ private struct DownloadSettingsScreen: View {
                 url.stopAccessingSecurityScopedResource()
             }
             try HanaDownloadDirectoryPreference.saveExternalDirectory(url)
+            try services.downloadClient.refreshExternalDirectoryAccess()
             refreshDownloadDirectoryName()
             toastMessage = .success("已选择 \(url.lastPathComponent)")
+        } catch {
+            alertMessage = .error(error.localizedDescription)
+        }
+    }
+
+    private func useApplicationDownloadDirectory() {
+        HanaDownloadDirectoryPreference.clear()
+        do {
+            try services.downloadClient.refreshExternalDirectoryAccess()
+            refreshDownloadDirectoryName()
+            toastMessage = .success("已改回应用目录")
         } catch {
             alertMessage = .error(error.localizedDescription)
         }

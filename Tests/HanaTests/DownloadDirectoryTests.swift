@@ -73,6 +73,33 @@ struct DownloadDirectoryTests {
     }
 #endif
 
+    @Test("retained external access stops exactly once")
+    func retainedExternalAccess() throws {
+        let fixture = try DownloadDirectoryFixture()
+        defer { fixture.remove() }
+        var started = 0
+        var stopped = 0
+        let store = fixture.makeStore(
+            startAccessing: { _ in
+                started += 1
+                return true
+            },
+            stopAccessing: { _ in stopped += 1 }
+        )
+        var access = try #require(try store.beginExternalDirectoryAccess())
+
+        #expect(started == 1)
+        #expect(stopped == 0)
+
+        access.invalidate()
+        access = try #require(try store.beginExternalDirectoryAccess())
+        #expect(started == 2)
+        #expect(stopped == 1)
+
+        access.invalidate()
+        #expect(stopped == 2)
+    }
+
     @Test("denied access does not create external files")
     func deniedAccess() throws {
         let fixture = try DownloadDirectoryFixture()

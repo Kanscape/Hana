@@ -70,6 +70,25 @@ nonisolated struct HanimeDownloadManifestItem: Codable, Identifiable, Sendable {
     var completedAt: Date
 }
 
+nonisolated final class HanimeDownloadDirectoryAccess {
+    private let stopAccessing: () -> Void
+    private var isActive = true
+
+    init(stopAccessing: @escaping () -> Void) {
+        self.stopAccessing = stopAccessing
+    }
+
+    func invalidate() {
+        guard isActive else { return }
+        isActive = false
+        stopAccessing()
+    }
+
+    deinit {
+        invalidate()
+    }
+}
+
 nonisolated struct HanimeDownloadFileStore {
     let fileManager: FileManager
     private let externalDirectoryResolver: () throws -> URL?
@@ -166,6 +185,18 @@ nonisolated struct HanimeDownloadFileStore {
                 }
                 return $0.videoCode > $1.videoCode
             }
+        }
+    }
+
+    func beginExternalDirectoryAccess() throws -> HanimeDownloadDirectoryAccess? {
+        guard let externalURL = try externalDirectoryResolver() else {
+            return nil
+        }
+        guard startAccessingExternalDirectory(externalURL) else {
+            throw HanaDownloadDirectoryError.accessDenied
+        }
+        return HanimeDownloadDirectoryAccess {
+            stopAccessingExternalDirectory(externalURL)
         }
     }
 
@@ -737,6 +768,7 @@ final class HanimeDownloadClient {
     @ObservationIgnored private lazy var backgroundDelegate = HanimeBackgroundDownloadDelegate(client: self)
     @ObservationIgnored private lazy var backgroundSession: URLSession = makeBackgroundSession()
     @ObservationIgnored private var backgroundEventsObserver: NSObjectProtocol?
+    @ObservationIgnored private var externalDirectoryAccess: HanimeDownloadDirectoryAccess?
     private var activeTasks: [String: URLSessionDownloadTask] = [:]
     private var progressByID: [String: Double] = [:]
     private var continuationsByTaskID: [Int: CheckedContinuation<HanimeDownloadedFile, Error>] = [:]
@@ -754,6 +786,7 @@ final class HanimeDownloadClient {
         self.fileManager = fileManager
         self.fileStore = HanimeDownloadFileStore(fileManager: fileManager)
         self.stateStore = HanimeDownloadTaskStateStore(fileManager: fileManager)
+        self.externalDirectoryAccess = try? fileStore.beginExternalDirectoryAccess()
         self.backgroundEventsObserver = NotificationCenter.default.addObserver(
             forName: Self.backgroundEventsNotification,
             object: nil,
@@ -765,6 +798,7 @@ final class HanimeDownloadClient {
     }
 
     deinit {
+        externalDirectoryAccess?.invalidate()
         if let backgroundEventsObserver {
             NotificationCenter.default.removeObserver(backgroundEventsObserver)
         }
@@ -839,6 +873,12 @@ final class HanimeDownloadClient {
 
     func localDownloads() throws -> [HanimeLocalDownload] {
         try fileStore.localDownloads()
+    }
+
+    func refreshExternalDirectoryAccess() throws {
+        let nextAccess = try fileStore.beginExternalDirectoryAccess()
+        externalDirectoryAccess?.invalidate()
+        externalDirectoryAccess = nextAccess
     }
 
     func exportDownloadsToExternalDirectory() throws -> Int {
