@@ -1437,6 +1437,7 @@ private struct LocalDataSettingsScreen: View {
     }
 
     private func delete(_ target: LocalDataDeletionTarget) {
+        var downloadDeletionError: Error?
         do {
             switch target {
             case .watchHistory:
@@ -1445,25 +1446,33 @@ private struct LocalDataSettingsScreen: View {
                 searchHistory.forEach(modelContext.delete)
                 advancedSearchHistory.forEach(modelContext.delete)
             case .downloads:
-                try deleteDownloads()
+                downloadDeletionError = deleteDownloads()
             case .hKeyframes:
                 hKeyframeRecords.forEach(modelContext.delete)
             case .all:
-                try deleteDownloads()
+                downloadDeletionError = deleteDownloads()
                 watchHistory.forEach(modelContext.delete)
                 searchHistory.forEach(modelContext.delete)
                 advancedSearchHistory.forEach(modelContext.delete)
                 hKeyframeRecords.forEach(modelContext.delete)
             }
             try modelContext.save()
-            toastMessage = .success("\(target.title)已删除")
             pendingDeletion = nil
+            if let downloadDeletionError {
+                let prefix = target == .all ? "其他本地数据已删除；" : ""
+                let message =
+                    "\(prefix)部分下载文件未能删除，相关下载记录已保留："
+                    + downloadDeletionError.localizedDescription
+                alertMessage = .error(message)
+            } else {
+                toastMessage = .success("\(target.title)已删除")
+            }
         } catch {
             alertMessage = .error(error.localizedDescription)
         }
     }
 
-    private func deleteDownloads() throws {
+    private func deleteDownloads() -> Error? {
         var firstError: Error?
         for item in downloadQueue {
             services.downloadClient.cancel(id: item.id)
@@ -1479,14 +1488,11 @@ private struct LocalDataSettingsScreen: View {
             }
             modelContext.delete(item)
         }
-        try modelContext.save()
-        if let firstError {
-            throw firstError
-        }
+        return firstError
     }
 }
 
-private enum LocalDataDeletionTarget: Identifiable {
+private enum LocalDataDeletionTarget: Identifiable, Equatable {
     case watchHistory
     case searchHistory
     case downloads
