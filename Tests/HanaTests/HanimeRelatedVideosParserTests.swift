@@ -26,7 +26,7 @@ struct HanimeRelatedVideosParserTests {
         #expect(legacy.views == "567 views")
     }
 
-    @Test("current grid cards preserve metadata and skip ads")
+    @Test("current grid cards preserve metadata, skip ads, and deduplicate responsive markup")
     func currentGridCards() throws {
         let videos = try parseFixture("related-videos-grid")
 

@@ -273,9 +273,17 @@ struct HanimeHTMLParser {
     }
 
     private func parseNormalCards(in root: Element) throws -> [HanimeInfo] {
-        try root.select("div[class^=horizontal-card], div.pure-grid-card")
-            .array()
-            .compactMap(parseNormalCard)
+        var seenVideoCodes = Set<String>()
+        var videos = [HanimeInfo]()
+        let cards = try root.select("div[class^=horizontal-card], div.pure-grid-card").array()
+        for card in cards {
+            guard let info = try parseNormalCard(from: card),
+                  seenVideoCodes.insert(info.videoCode).inserted else {
+                continue
+            }
+            videos.append(info)
+        }
+        return videos
     }
 
     private func parseAccountCards(in root: Element, selector: String) throws -> [HanimeInfo] {
