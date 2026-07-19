@@ -17,23 +17,32 @@ enum HanaDownloadRecordSynchronizer {
             modelContext: modelContext,
             records: &records
         ) || changed
-        changed = importLocalDownloads(
-            downloadClient: downloadClient,
-            modelContext: modelContext,
-            records: &records
-        ) || changed
+        let localDownloads: [HanimeLocalDownload]? = if downloadClient.externalDirectoryAccessError == nil {
+            try? downloadClient.localDownloads()
+        } else {
+            nil
+        }
+        if let localDownloads {
+            changed = importLocalDownloads(
+                files: localDownloads,
+                modelContext: modelContext,
+                records: &records
+            ) || changed
+        }
         changed = recoverInterruptedDownloads(
             downloadClient: downloadClient,
             records: records
         ) || changed
-        changed = deleteDuplicateRecords(
-            modelContext: modelContext,
-            records: &records
-        ) || changed
-        changed = deleteMissingCompletedRecords(
-            modelContext: modelContext,
-            records: &records
-        ) || changed
+        if localDownloads != nil {
+            changed = deleteDuplicateRecords(
+                modelContext: modelContext,
+                records: &records
+            ) || changed
+            changed = deleteMissingCompletedRecords(
+                modelContext: modelContext,
+                records: &records
+            ) || changed
+        }
 
         if changed {
             try? modelContext.save()
@@ -82,11 +91,11 @@ enum HanaDownloadRecordSynchronizer {
 
     @discardableResult
     static func importLocalDownloads(
-        downloadClient: HanimeDownloadClient,
+        files: [HanimeLocalDownload],
         modelContext: ModelContext,
         records: inout [DownloadQueueRecord]
     ) -> Bool {
-        guard let files = try? downloadClient.localDownloads(), !files.isEmpty else {
+        guard !files.isEmpty else {
             return false
         }
 
