@@ -99,6 +99,7 @@ struct HanaApp: App {
                 Button("设置...") {
                     HanaSettingsWindowController.shared.open(
                         services: services,
+                        disciplineModeStore: disciplineModeStore,
                         reloadServicesAction: reloadServicesAction,
                         modelContainer: sharedModelContainer
                     )
@@ -129,11 +130,13 @@ private final class HanaSettingsWindowController {
 
     func open(
         services: HanaServices,
+        disciplineModeStore: DisciplineModeStore,
         reloadServicesAction: HanaServiceReloadAction,
         modelContainer: ModelContainer
     ) {
         let rootView = makeRootView(
             services: services,
+            disciplineModeStore: disciplineModeStore,
             reloadServicesAction: reloadServicesAction,
             modelContainer: modelContainer
         )
@@ -174,12 +177,14 @@ private final class HanaSettingsWindowController {
 
     private func makeRootView(
         services: HanaServices,
+        disciplineModeStore: DisciplineModeStore,
         reloadServicesAction: HanaServiceReloadAction,
         modelContainer: ModelContainer
     ) -> AnyView {
         AnyView(
             SettingsScreen()
                 .environment(services)
+                .environment(disciplineModeStore)
                 .environment(\.hanaReloadServices, reloadServicesAction)
                 .modelContainer(modelContainer)
                 .frame(minWidth: 680, minHeight: 600)

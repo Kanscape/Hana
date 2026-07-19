@@ -1,6 +1,6 @@
 import Foundation
 
-public struct DisciplineModeConfiguration: Codable, Equatable, Sendable {
+nonisolated public struct DisciplineModeConfiguration: Codable, Equatable, Sendable {
     public var createdAt: Date
     public var mode: DisciplineModeMode
 
@@ -10,13 +10,13 @@ public struct DisciplineModeConfiguration: Codable, Equatable, Sendable {
     }
 }
 
-public enum DisciplineModeMode: Codable, Equatable, Sendable {
+nonisolated public enum DisciplineModeMode: Codable, Equatable, Sendable {
     case single(until: Date)
     case recurring(DisciplineModeRecurringConfiguration)
     case weekly(DisciplineModeWeeklyConfiguration)
 }
 
-public struct DisciplineModeRecurringConfiguration: Codable, Equatable, Sendable {
+nonisolated public struct DisciplineModeRecurringConfiguration: Codable, Equatable, Sendable {
     public var cycleLengthDays: Int
     public var allowedDayNumbers: Set<Int>
 
@@ -33,7 +33,7 @@ public struct DisciplineModeRecurringConfiguration: Codable, Equatable, Sendable
     }
 }
 
-public struct DisciplineModeWeeklyConfiguration: Codable, Equatable, Sendable {
+nonisolated public struct DisciplineModeWeeklyConfiguration: Codable, Equatable, Sendable {
     public static let cycleLengthDays = 7
 
     public var allowedWeekdayNumbers: Set<Int>
