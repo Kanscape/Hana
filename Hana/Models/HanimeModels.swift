@@ -211,8 +211,9 @@ struct HanimeBanner: Identifiable, Hashable, Sendable {
 }
 
 struct HanimeHomeSection: Identifiable, Hashable, Sendable {
-    var id: String { title }
+    var id: String { key }
 
+    let key: String
     let title: String
     let videos: [HanimeInfo]
 }
@@ -262,6 +263,13 @@ struct HanimeInfo: Identifiable, Hashable, Sendable {
             style: .normal
         )
     ]
+}
+
+extension Sequence where Element == HanimeInfo {
+    func deduplicatedByVideoCode() -> [HanimeInfo] {
+        var seen = Set<String>()
+        return filter { seen.insert($0.videoCode).inserted }
+    }
 }
 
 struct HanimeAccountVideoList: Hashable, Sendable {

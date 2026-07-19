@@ -35,7 +35,7 @@ final class SiteWebSession {
     var avatarURLString: String?
 
     private let defaults: UserDefaults
-    private static let legacyCookieHeaderKey = "Hana.SiteWebSession.cookieHeader"
+    private let cookieStore: HanaSessionCookieStore
     private static let legacyIsLoggedInKey = "Hana.SiteWebSession.isLoggedIn"
     private static let legacyUserIDKey = "Hana.SiteWebSession.userID"
     private static let legacyUsernameKey = "Hana.SiteWebSession.username"
@@ -43,10 +43,6 @@ final class SiteWebSession {
 
     private var keySuffix: String {
         Self.keySuffix(for: baseURL)
-    }
-
-    private var cookieHeaderKey: String {
-        Self.scopedKey("cookieHeader", suffix: keySuffix)
     }
 
     private var isLoggedInKey: String {
@@ -88,12 +84,17 @@ final class SiteWebSession {
     }
 
     private var storedCookieHeader: String? {
-        Self.storedCookieHeader(for: baseURL, defaults: defaults)
+        cookieStore.cookieHeader(for: baseURL)
     }
 
-    init(baseURL: URL, defaults: UserDefaults = .standard) {
+    init(
+        baseURL: URL,
+        defaults: UserDefaults = .standard,
+        cookieStore: HanaSessionCookieStore
+    ) {
         self.baseURL = baseURL
         self.defaults = defaults
+        self.cookieStore = cookieStore
         let legacyHost = baseURL.host() == URL(string: HanaSiteBaseURL.defaultValue)?.host()
         let keySuffix = Self.keySuffix(for: baseURL)
         let isLoggedInKey = Self.scopedKey("isLoggedIn", suffix: keySuffix)
@@ -138,7 +139,7 @@ final class SiteWebSession {
         let storage = HTTPCookieStorage.shared
         cookies.forEach { storage.setCookie($0) }
         if let cookieHeader = cookieHeader(from: cookies) {
-            defaults.set(cookieHeader, forKey: cookieHeaderKey)
+            cookieStore.saveCookieHeader(cookieHeader, for: baseURL)
         }
         lastSyncedCookieCount = cookies.count
         lastCookieSyncAt = .now
@@ -177,29 +178,22 @@ final class SiteWebSession {
         defaults.set(user.avatarURL?.absoluteString, forKey: avatarURLStringKey)
     }
 
-    func logout() {
+    func logout() async {
         isLoggedIn = false
         userID = nil
         username = nil
         avatarURLString = nil
-        defaults.removeObject(forKey: cookieHeaderKey)
+        cookieStore.removeCookieHeader(for: baseURL)
         defaults.set(false, forKey: isLoggedInKey)
         defaults.removeObject(forKey: userIDKey)
         defaults.removeObject(forKey: usernameKey)
         defaults.removeObject(forKey: avatarURLStringKey)
         removeCookiesForCurrentHost()
+        await removeDefaultWebCookiesForCurrentHost()
     }
 
     func cancel() {
         activeFlow = nil
-    }
-
-    static func storedCookieHeader(for baseURL: URL, defaults: UserDefaults = .standard) -> String? {
-        let keySuffix = keySuffix(for: baseURL)
-        let cookieHeaderKey = scopedKey("cookieHeader", suffix: keySuffix)
-        let legacyHost = baseURL.host() == URL(string: HanaSiteBaseURL.defaultValue)?.host()
-        return defaults.string(forKey: cookieHeaderKey)
-            ?? (legacyHost ? defaults.string(forKey: legacyCookieHeaderKey) : nil)
     }
 
     private func loadStoredCookieMetadata() {
@@ -210,10 +204,7 @@ final class SiteWebSession {
 
     private func cookieHeader(from cookies: [HTTPCookie]) -> String? {
         let header = cookies
-            .filter { cookie in
-                guard let host = baseURL.host() else { return true }
-                return cookie.domain.contains(host) || host.contains(cookie.domain.trimmingCharacters(in: CharacterSet(charactersIn: ".")))
-            }
+            .filter(cookieMatchesCurrentHost)
             .map { "\($0.name)=\($0.value)" }
             .joined(separator: "; ")
         return header.isEmpty ? nil : header
@@ -254,16 +245,33 @@ final class SiteWebSession {
     }
 
     private func removeCookiesForCurrentHost() {
-        guard let host = baseURL.host() else {
-            HTTPCookieStorage.shared.cookies?.forEach { HTTPCookieStorage.shared.deleteCookie($0) }
-            return
-        }
         HTTPCookieStorage.shared.cookies?.forEach { cookie in
-            let cookieDomain = cookie.domain.trimmingCharacters(in: CharacterSet(charactersIn: "."))
-            if cookieDomain.contains(host) || host.contains(cookieDomain) {
+            if cookieMatchesCurrentHost(cookie) {
                 HTTPCookieStorage.shared.deleteCookie(cookie)
             }
         }
+    }
+
+    private func removeDefaultWebCookiesForCurrentHost() async {
+        let cookieStore = WKWebsiteDataStore.default().httpCookieStore
+        let cookies = await withCheckedContinuation { continuation in
+            cookieStore.getAllCookies { continuation.resume(returning: $0) }
+        }
+        for cookie in cookies where cookieMatchesCurrentHost(cookie) {
+            await withCheckedContinuation { continuation in
+                cookieStore.delete(cookie) { continuation.resume() }
+            }
+        }
+    }
+
+    private func cookieMatchesCurrentHost(_ cookie: HTTPCookie) -> Bool {
+        guard let host = baseURL.host()?.lowercased() else { return false }
+        let cookieDomain = cookie.domain
+            .trimmingCharacters(in: CharacterSet(charactersIn: "."))
+            .lowercased()
+        return cookieDomain == host
+            || cookieDomain.hasSuffix(".\(host)")
+            || host.hasSuffix(".\(cookieDomain)")
     }
 
     private static func keySuffix(for baseURL: URL) -> String {

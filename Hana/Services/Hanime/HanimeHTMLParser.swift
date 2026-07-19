@@ -13,6 +13,27 @@ enum HanimeParseError: LocalizedError {
 }
 
 struct HanimeHTMLParser {
+    private struct HomeRecommendationDescriptor {
+        let key: String
+        let title: String
+        let sourceIndex: Int
+    }
+
+    private static let homeRecommendationDescriptors = [
+        HomeRecommendationDescriptor(key: "latest_hanime", title: "最新里番", sourceIndex: 2),
+        HomeRecommendationDescriptor(key: "latest_release", title: "最新上市", sourceIndex: 0),
+        HomeRecommendationDescriptor(key: "latest_upload", title: "最新上传", sourceIndex: 1),
+        HomeRecommendationDescriptor(key: "watching_now", title: "他们在看", sourceIndex: 13),
+        HomeRecommendationDescriptor(key: "short_episode", title: "泡面番", sourceIndex: 3),
+        HomeRecommendationDescriptor(key: "motion_anime", title: "动态动画", sourceIndex: 5),
+        HomeRecommendationDescriptor(key: "3d_cg", title: "3D作品", sourceIndex: 6),
+        HomeRecommendationDescriptor(key: "2_5d", title: "2.5D", sourceIndex: 7),
+        HomeRecommendationDescriptor(key: "2d_anime", title: "2D动画", sourceIndex: 8),
+        HomeRecommendationDescriptor(key: "ai_generated", title: "AI生成", sourceIndex: 10),
+        HomeRecommendationDescriptor(key: "mmd", title: "MMD", sourceIndex: 11),
+        HomeRecommendationDescriptor(key: "cosplay", title: "Cosplay", sourceIndex: 12)
+    ]
+
     let baseURL: URL
 
     func parseHome(_ html: String) throws -> HanimeHomePage {
@@ -20,13 +41,20 @@ struct HanimeHTMLParser {
         let banner = try parseBanner(from: body)
         let rowElements = try body.select("div[id=home-rows-wrapper] > div").array()
 
-        let sections = try rowElements.enumerated().compactMap { index, element -> HanimeHomeSection? in
+        let sections = try Self.homeRecommendationDescriptors.compactMap { descriptor -> HanimeHomeSection? in
+            guard rowElements.indices.contains(descriptor.sourceIndex) else { return nil }
+            let element = rowElements[descriptor.sourceIndex]
             let videos = try parseVideoCards(in: element)
             guard !videos.isEmpty else { return nil }
             return HanimeHomeSection(
-                title: try sectionTitle(for: element, index: index),
+                key: descriptor.key,
+                title: descriptor.title,
                 videos: videos
             )
+        }
+
+        guard !sections.isEmpty else {
+            throw HanimeParseError.missingRequiredField("home recommendations")
         }
 
         return HanimeHomePage(banner: banner, sections: sections)
@@ -254,28 +282,26 @@ struct HanimeHTMLParser {
         )
     }
 
-    private func sectionTitle(for element: Element, index: Int) throws -> String {
-        if let title = try element.select("h2, h3, h4, .home-rows-title").first()?.text().trimmedNonEmpty() {
-            return title
-        }
-
-        let knownTitles = [
-            "最新上市", "最新上传", "里番", "泡面番", "Motion Anime", "3DCG",
-            "2.5D", "2D", "AI 生成", "MMD", "Cosplay", "他们在看", "新番预告"
-        ]
-        return knownTitles.indices.contains(index) ? knownTitles[index] : "分区 \(index + 1)"
-    }
-
     private func parseVideoCards(in element: Element) throws -> [HanimeInfo] {
         let normalCards = try parseNormalCards(in: element)
         if !normalCards.isEmpty {
-            return normalCards
+            return normalCards.deduplicatedByVideoCode()
         }
-        return try parseSimplifiedCards(in: element)
+        return try parseSimplifiedCards(in: element).deduplicatedByVideoCode()
     }
 
     private func parseNormalCards(in root: Element) throws -> [HanimeInfo] {
-        try root.select("div[class^=horizontal-card]").array().compactMap(parseNormalCard)
+        var seenVideoCodes = Set<String>()
+        var videos = [HanimeInfo]()
+        let cards = try root.select("div[class^=horizontal-card], div.pure-grid-card").array()
+        for card in cards {
+            guard let info = try parseNormalCard(from: card),
+                  seenVideoCodes.insert(info.videoCode).inserted else {
+                continue
+            }
+            videos.append(info)
+        }
+        return videos
     }
 
     private func parseAccountCards(in root: Element, selector: String) throws -> [HanimeInfo] {
@@ -286,7 +312,8 @@ struct HanimeHTMLParser {
         var seenVideoCodes = Set<String>()
         var videos = [HanimeInfo]()
         for link in try root.select("a[href]").array() {
-            guard let info = try parseSimplifiedCard(from: link),
+            guard try link.select("div.home-rows-videos-div").first() != nil,
+                  let info = try parseSimplifiedCard(from: link),
                   seenVideoCodes.insert(info.videoCode).inserted else {
                 continue
             }
@@ -296,7 +323,10 @@ struct HanimeHTMLParser {
     }
 
     private func parseNormalCard(from element: Element) throws -> HanimeInfo? {
-        let title = try element.select("div.title, h4.video-title").first()?.text().trimmedNonEmpty()
+        let title = try element.select("div.title, h4.video-title, div.grid-title")
+            .first()?
+            .text()
+            .trimmedNonEmpty()
             ?? (try element.select("img").first()?.attr("alt").trimmedNonEmpty())
             ?? (try element.attr("title").trimmedNonEmpty())
         let coverURL = try firstURL(from: element.select("img").first(), attribute: "src")
@@ -305,12 +335,20 @@ struct HanimeHTMLParser {
 
         guard let title, let code else { return nil }
 
-        let thumbContainer = try element.select("div[class^=thumb-container]")
-        let duration = try thumbContainer.select("div[class^=duration]").text().trimmedNonEmpty()
-        let stats = try thumbContainer.select("div[class^=stat-item]").array()
+        let thumbContainer = try element.select("div[class^=thumb-container], div.grid-thumb-container").first()
+        let duration = try thumbContainer?
+            .select("div[class^=duration], div.grid-duration")
+            .first()?
+            .text()
+            .trimmedNonEmpty()
+        let stats = try thumbContainer?
+            .select("div[class^=stat-item], div.grid-stat-item")
+            .array() ?? []
         let views = try stats.dropFirst().first?.text().trimmedNonEmpty()
 
-        let artistAndUploadTime = try element.select("div.subtitle a, div.video-meta-data a")
+        let artistAndUploadTime = try element.select(
+            "div.subtitle a, div.video-meta-data a, div.grid-subtitle a"
+        )
             .first()?
             .text()
             .trimmedNonEmpty()
