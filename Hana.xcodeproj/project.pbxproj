@@ -34,6 +34,7 @@
 		F4A100092FB8000000000009 /* home-recommendations-reference.html in Resources */ = {isa = PBXBuildFile; fileRef = F4A100042FB8000000000004 /* home-recommendations-reference.html */; };
 		F4A1000A2FB800000000000A /* home-recommendations-compact.html in Resources */ = {isa = PBXBuildFile; fileRef = F4A100052FB8000000000005 /* home-recommendations-compact.html */; };
 		F4A1000B2FB800000000000B /* home-recommendations-unknown.html in Resources */ = {isa = PBXBuildFile; fileRef = F4A100062FB8000000000006 /* home-recommendations-unknown.html */; };
+		F4FADE022FB900000C55FF9 /* HanaHorizontalFadeMetricsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4FADE012FB900000C55FF9 /* HanaHorizontalFadeMetricsTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -74,6 +75,7 @@
 		F4A100042FB8000000000004 /* home-recommendations-reference.html */ = {isa = PBXFileReference; lastKnownFileType = text.html; path = "home-recommendations-reference.html"; sourceTree = "<group>"; };
 		F4A100052FB8000000000005 /* home-recommendations-compact.html */ = {isa = PBXFileReference; lastKnownFileType = text.html; path = "home-recommendations-compact.html"; sourceTree = "<group>"; };
 		F4A100062FB8000000000006 /* home-recommendations-unknown.html */ = {isa = PBXFileReference; lastKnownFileType = text.html; path = "home-recommendations-unknown.html"; sourceTree = "<group>"; };
+		F4FADE012FB900000C55FF9 /* HanaHorizontalFadeMetricsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HanaHorizontalFadeMetricsTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -144,6 +146,7 @@
 			isa = PBXGroup;
 			children = (
 				F44DB4A12FB762000C55FF9 /* AppBuildInfoTests.swift */,
+				F4FADE012FB900000C55FF9 /* HanaHorizontalFadeMetricsTests.swift */,
 				F44DB4B02FB762000C55FF9 /* HanaBackupServiceTests.swift */,
 				F44DB4B02FB763000C55FF9 /* DownloadResumeStateTests.swift */,
 				F44DB4B52FB7A0000C55FF9 /* HanimeDuplicateVideoParserTests.swift */,
@@ -323,6 +326,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				F44DB4A92FB762000C55FF9 /* AppBuildInfoTests.swift in Sources */,
+				F4FADE022FB900000C55FF9 /* HanaHorizontalFadeMetricsTests.swift in Sources */,
 				F44DB4B12FB762000C55FF9 /* HanaBackupServiceTests.swift in Sources */,
 				F44DB4B12FB763000C55FF9 /* DownloadResumeStateTests.swift in Sources */,
 				F44DB4B42FB7A0000C55FF9 /* HanimeDuplicateVideoParserTests.swift in Sources */,

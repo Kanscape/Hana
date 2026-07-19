@@ -18,7 +18,10 @@ struct VideoSeriesSection: View {
       }
 
       ScrollViewReader { proxy in
-        ScrollView(.horizontal, showsIndicators: false) {
+        HanaHorizontalFadingScrollView(
+          contentLeadingPadding: 1,
+          contentTrailingPadding: 1
+        ) {
           LazyHStack(alignment: .top, spacing: 12) {
             ForEach(series.videos) { video in
               NavigationLink(value: HanaRoute.video(video.videoCode)) {
@@ -28,9 +31,7 @@ struct VideoSeriesSection: View {
               .id(video.videoCode)
             }
           }
-          .scrollTargetLayout()
         }
-        .scrollTargetBehavior(.viewAligned)
         .task(id: series.currentVideoCode) {
           scrollToCurrent(using: proxy)
         }
