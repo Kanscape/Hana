@@ -11,6 +11,12 @@
 		F44DB4932FB760000C55FF9 /* Nuke in Frameworks */ = {isa = PBXBuildFile; productRef = F44DB4952FB760000C55FF9 /* Nuke */; };
 		F44DB4942FB760000C55FF9 /* NukeUI in Frameworks */ = {isa = PBXBuildFile; productRef = F44DB4962FB760000C55FF9 /* NukeUI */; };
 		F44DB4A92FB762000C55FF9 /* AppBuildInfoTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F44DB4A12FB762000C55FF9 /* AppBuildInfoTests.swift */; };
+		F44DB4C52FB780000C55FF9 /* HanimeSeriesParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F44DB4C02FB780000C55FF9 /* HanimeSeriesParserTests.swift */; };
+		F44DB4C62FB780000C55FF9 /* series-playlist-new.html in Resources */ = {isa = PBXBuildFile; fileRef = F44DB4C12FB780000C55FF9 /* series-playlist-new.html */; };
+		F44DB4C72FB780000C55FF9 /* series-playlist-legacy.html in Resources */ = {isa = PBXBuildFile; fileRef = F44DB4C22FB780000C55FF9 /* series-playlist-legacy.html */; };
+		F44DB4C82FB780000C55FF9 /* series-playlist-edge-cases.html in Resources */ = {isa = PBXBuildFile; fileRef = F44DB4C32FB780000C55FF9 /* series-playlist-edge-cases.html */; };
+		F44DB4C92FB780000C55FF9 /* video-without-series.html in Resources */ = {isa = PBXBuildFile; fileRef = F44DB4C42FB780000C55FF9 /* video-without-series.html */; };
+		F44DB4CC2FB780000C55FF9 /* series-playlist-legacy-direct-anchor.html in Resources */ = {isa = PBXBuildFile; fileRef = F44DB4CB2FB780000C55FF9 /* series-playlist-legacy-direct-anchor.html */; };
 		F44DB4B12FB770000C55FF9 /* HanaSessionCookieStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F44DB4B02FB770000C55FF9 /* HanaSessionCookieStoreTests.swift */; };
 		F44DB4D02FB790000C55FF9 /* HanimeRelatedVideosParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F44DB4D12FB790000C55FF9 /* HanimeRelatedVideosParserTests.swift */; };
 		F44DB4D22FB790000C55FF9 /* related-videos-normal.html in Resources */ = {isa = PBXBuildFile; fileRef = F44DB4D32FB790000C55FF9 /* related-videos-normal.html */; };
@@ -38,6 +44,12 @@
 		F44DB4982FB761000C55FF9 /* Version.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Version.xcconfig; sourceTree = "<group>"; };
 		F44DB4A02FB762000C55FF9 /* HanaTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = HanaTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		F44DB4A12FB762000C55FF9 /* AppBuildInfoTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppBuildInfoTests.swift; sourceTree = "<group>"; };
+		F44DB4C02FB780000C55FF9 /* HanimeSeriesParserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HanimeSeriesParserTests.swift; sourceTree = "<group>"; };
+		F44DB4C12FB780000C55FF9 /* series-playlist-new.html */ = {isa = PBXFileReference; lastKnownFileType = text.html; path = "series-playlist-new.html"; sourceTree = "<group>"; };
+		F44DB4C22FB780000C55FF9 /* series-playlist-legacy.html */ = {isa = PBXFileReference; lastKnownFileType = text.html; path = "series-playlist-legacy.html"; sourceTree = "<group>"; };
+		F44DB4C32FB780000C55FF9 /* series-playlist-edge-cases.html */ = {isa = PBXFileReference; lastKnownFileType = text.html; path = "series-playlist-edge-cases.html"; sourceTree = "<group>"; };
+		F44DB4C42FB780000C55FF9 /* video-without-series.html */ = {isa = PBXFileReference; lastKnownFileType = text.html; path = "video-without-series.html"; sourceTree = "<group>"; };
+		F44DB4CB2FB780000C55FF9 /* series-playlist-legacy-direct-anchor.html */ = {isa = PBXFileReference; lastKnownFileType = text.html; path = "series-playlist-legacy-direct-anchor.html"; sourceTree = "<group>"; };
 		F44DB4B02FB770000C55FF9 /* HanaSessionCookieStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HanaSessionCookieStoreTests.swift; sourceTree = "<group>"; };
 		F44DB4D12FB790000C55FF9 /* HanimeRelatedVideosParserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HanimeRelatedVideosParserTests.swift; sourceTree = "<group>"; };
 		F44DB4D32FB790000C55FF9 /* related-videos-normal.html */ = {isa = PBXFileReference; lastKnownFileType = text.html; path = "related-videos-normal.html"; sourceTree = "<group>"; };
@@ -101,6 +113,7 @@
 			isa = PBXGroup;
 			children = (
 				F44DB4A12FB762000C55FF9 /* AppBuildInfoTests.swift */,
+				F44DB4C02FB780000C55FF9 /* HanimeSeriesParserTests.swift */,
 				F44DB4B02FB770000C55FF9 /* HanaSessionCookieStoreTests.swift */,
 				F44DB4D12FB790000C55FF9 /* HanimeRelatedVideosParserTests.swift */,
 				F4A100012FB8000000000001 /* HanimeHomeParserTests.swift */,
@@ -119,6 +132,11 @@
 				F44DB4D82FB790000C55FF9 /* related-videos-grid.html */,
 				F44DB4D32FB790000C55FF9 /* related-videos-normal.html */,
 				F44DB4D52FB790000C55FF9 /* related-videos-simplified.html */,
+				F44DB4C12FB780000C55FF9 /* series-playlist-new.html */,
+				F44DB4C22FB780000C55FF9 /* series-playlist-legacy.html */,
+				F44DB4CB2FB780000C55FF9 /* series-playlist-legacy-direct-anchor.html */,
+				F44DB4C32FB780000C55FF9 /* series-playlist-edge-cases.html */,
+				F44DB4C42FB780000C55FF9 /* video-without-series.html */,
 			);
 			path = Fixtures;
 			sourceTree = "<group>";
@@ -243,6 +261,11 @@
 				F44DB4D72FB790000C55FF9 /* related-videos-grid.html in Resources */,
 				F44DB4D22FB790000C55FF9 /* related-videos-normal.html in Resources */,
 				F44DB4D42FB790000C55FF9 /* related-videos-simplified.html in Resources */,
+				F44DB4C62FB780000C55FF9 /* series-playlist-new.html in Resources */,
+				F44DB4C72FB780000C55FF9 /* series-playlist-legacy.html in Resources */,
+				F44DB4CC2FB780000C55FF9 /* series-playlist-legacy-direct-anchor.html in Resources */,
+				F44DB4C82FB780000C55FF9 /* series-playlist-edge-cases.html in Resources */,
+				F44DB4C92FB780000C55FF9 /* video-without-series.html in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -261,6 +284,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				F44DB4A92FB762000C55FF9 /* AppBuildInfoTests.swift in Sources */,
+				F44DB4C52FB780000C55FF9 /* HanimeSeriesParserTests.swift in Sources */,
 				F44DB4B12FB770000C55FF9 /* HanaSessionCookieStoreTests.swift in Sources */,
 				F44DB4D02FB790000C55FF9 /* HanimeRelatedVideosParserTests.swift in Sources */,
 				F4A100072FB8000000000007 /* HanimeHomeParserTests.swift in Sources */,
