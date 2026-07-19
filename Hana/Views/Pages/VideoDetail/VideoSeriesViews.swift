@@ -50,7 +50,7 @@ struct VideoSeriesSection: View {
 private struct VideoSeriesCard: View {
   let video: HanimeSeriesVideo
 
-  private let width: CGFloat = 216
+  private let width: CGFloat = 196
 
   var body: some View {
     VStack(alignment: .leading, spacing: 7) {
@@ -83,9 +83,9 @@ private struct VideoSeriesCard: View {
     )
     .overlay {
       RoundedRectangle(cornerRadius: 8)
-        .stroke(
+        .strokeBorder(
           video.isCurrent ? Color.accentColor : .secondary.opacity(0.14),
-          lineWidth: video.isCurrent ? 2 : 1)
+          lineWidth: video.isCurrent ? 1.5 : 1)
     }
     .overlay(alignment: .topLeading) {
       if video.isCurrent {
