@@ -444,7 +444,7 @@ private enum HanaVideoDetailTopTab: String, CaseIterable, Identifiable, Hashable
         case .details:
             switch mode {
             case .detail:
-                "详情"
+                "相关"
             case .secondary:
                 "相关"
             }
