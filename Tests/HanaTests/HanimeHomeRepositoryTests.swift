@@ -21,14 +21,25 @@ struct HanimeHomeRepositoryTests {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [HomeRepositoryURLProtocol.self]
         let session = URLSession(configuration: configuration)
+        let defaultsSuiteName = "HanimeHomeRepositoryTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: defaultsSuiteName))
         defer {
             session.invalidateAndCancel()
             HomeRepositoryURLProtocol.reset(responseData: Data())
+            defaults.removePersistentDomain(forName: defaultsSuiteName)
         }
 
         let baseURL = try #require(URL(string: "https://example.invalid/base/"))
+        let sessionCookieStore = HanaSessionCookieStore(
+            credentialStore: HomeRepositoryCredentialStore(),
+            defaults: defaults
+        )
         let repository = HanimeRepository(
-            httpClient: HanaHTTPClient(baseURL: baseURL, session: session),
+            httpClient: HanaHTTPClient(
+                baseURL: baseURL,
+                sessionCookieStore: sessionCookieStore,
+                session: session
+            ),
             parser: HanimeHTMLParser(baseURL: baseURL)
         )
 
@@ -41,6 +52,12 @@ struct HanimeHomeRepositoryTests {
 }
 
 private final class HomeRepositoryFixtureBundleToken {}
+
+private struct HomeRepositoryCredentialStore: HanaCredentialStore {
+    func data(for account: String) throws -> Data? { nil }
+    func set(_ data: Data, for account: String) throws {}
+    func removeData(for account: String) throws {}
+}
 
 nonisolated private final class HomeRepositoryURLProtocol: URLProtocol, @unchecked Sendable {
     private static let lock = NSLock()
