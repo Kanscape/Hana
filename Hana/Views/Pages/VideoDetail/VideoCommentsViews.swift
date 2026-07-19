@@ -426,7 +426,10 @@ struct HanimeCommentThreadView: View {
                                     onOpenThread: {}
                                 )
                                 .padding(.vertical, 12)
-                                Divider()
+
+                                if reply.id != page.comments.last?.id {
+                                    Divider()
+                                }
                             }
                         }
                     }
