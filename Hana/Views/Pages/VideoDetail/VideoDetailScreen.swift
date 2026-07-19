@@ -93,6 +93,7 @@ struct VideoDetailScreen: View {
                 HStack(alignment: .top, spacing: layout.columnSpacing) {
                     ScrollView(.vertical, showsIndicators: false) {
                         primaryColumn(video)
+                            .padding(.bottom, layout.bottomContentPadding)
                             .frame(width: layout.playerColumnWidth, alignment: .topLeading)
                     }
                     .refreshable {
@@ -105,6 +106,7 @@ struct VideoDetailScreen: View {
                             topSwitchBar(mode: .secondary)
                             secondaryColumn(video)
                         }
+                        .padding(.bottom, layout.bottomContentPadding)
                         .frame(width: layout.sideColumnWidth, alignment: .topLeading)
                     }
                     .refreshable {
@@ -479,6 +481,10 @@ private struct HanaVideoDetailAdaptiveLayout {
 
     var verticalPadding: CGFloat {
         usesSideBySideLayout ? 0 : 16
+    }
+
+    var bottomContentPadding: CGFloat {
+        usesSideBySideLayout ? 24 : 0
     }
 
     var columnSpacing: CGFloat {
