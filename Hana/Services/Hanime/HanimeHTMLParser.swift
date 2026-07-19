@@ -13,6 +13,27 @@ enum HanimeParseError: LocalizedError {
 }
 
 struct HanimeHTMLParser {
+    private struct HomeRecommendationDescriptor {
+        let key: String
+        let title: String
+        let sourceIndex: Int
+    }
+
+    private static let homeRecommendationDescriptors = [
+        HomeRecommendationDescriptor(key: "latest_hanime", title: "最新里番", sourceIndex: 2),
+        HomeRecommendationDescriptor(key: "latest_release", title: "最新上市", sourceIndex: 0),
+        HomeRecommendationDescriptor(key: "latest_upload", title: "最新上传", sourceIndex: 1),
+        HomeRecommendationDescriptor(key: "watching_now", title: "他们在看", sourceIndex: 13),
+        HomeRecommendationDescriptor(key: "short_episode", title: "泡面番", sourceIndex: 3),
+        HomeRecommendationDescriptor(key: "motion_anime", title: "动态动画", sourceIndex: 5),
+        HomeRecommendationDescriptor(key: "3d_cg", title: "3D作品", sourceIndex: 6),
+        HomeRecommendationDescriptor(key: "2_5d", title: "2.5D", sourceIndex: 7),
+        HomeRecommendationDescriptor(key: "2d_anime", title: "2D动画", sourceIndex: 8),
+        HomeRecommendationDescriptor(key: "ai_generated", title: "AI生成", sourceIndex: 10),
+        HomeRecommendationDescriptor(key: "mmd", title: "MMD", sourceIndex: 11),
+        HomeRecommendationDescriptor(key: "cosplay", title: "Cosplay", sourceIndex: 12)
+    ]
+
     let baseURL: URL
 
     func parseHome(_ html: String) throws -> HanimeHomePage {
@@ -20,13 +41,20 @@ struct HanimeHTMLParser {
         let banner = try parseBanner(from: body)
         let rowElements = try body.select("div[id=home-rows-wrapper] > div").array()
 
-        let sections = try rowElements.enumerated().compactMap { index, element -> HanimeHomeSection? in
+        let sections = try Self.homeRecommendationDescriptors.compactMap { descriptor -> HanimeHomeSection? in
+            guard rowElements.indices.contains(descriptor.sourceIndex) else { return nil }
+            let element = rowElements[descriptor.sourceIndex]
             let videos = try parseVideoCards(in: element)
             guard !videos.isEmpty else { return nil }
             return HanimeHomeSection(
-                title: try sectionTitle(for: element, index: index),
+                key: descriptor.key,
+                title: descriptor.title,
                 videos: videos
             )
+        }
+
+        guard !sections.isEmpty else {
+            throw HanimeParseError.missingRequiredField("home recommendations")
         }
 
         return HanimeHomePage(banner: banner, sections: sections)
@@ -252,24 +280,12 @@ struct HanimeHTMLParser {
         )
     }
 
-    private func sectionTitle(for element: Element, index: Int) throws -> String {
-        if let title = try element.select("h2, h3, h4, .home-rows-title").first()?.text().trimmedNonEmpty() {
-            return title
-        }
-
-        let knownTitles = [
-            "最新上市", "最新上传", "里番", "泡面番", "Motion Anime", "3DCG",
-            "2.5D", "2D", "AI 生成", "MMD", "Cosplay", "他们在看", "新番预告"
-        ]
-        return knownTitles.indices.contains(index) ? knownTitles[index] : "分区 \(index + 1)"
-    }
-
     private func parseVideoCards(in element: Element) throws -> [HanimeInfo] {
         let normalCards = try parseNormalCards(in: element)
         if !normalCards.isEmpty {
-            return normalCards
+            return normalCards.deduplicatedByVideoCode()
         }
-        return try parseSimplifiedCards(in: element)
+        return try parseSimplifiedCards(in: element).deduplicatedByVideoCode()
     }
 
     private func parseNormalCards(in root: Element) throws -> [HanimeInfo] {
