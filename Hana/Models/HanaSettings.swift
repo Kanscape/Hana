@@ -24,6 +24,7 @@ enum HanaSettingsKey {
     static let defaultDownloadQuality = "hana.settings.defaultDownloadQuality"
     static let downloadConcurrency = "hana.settings.downloadConcurrency"
     static let warnBeforeMobileDataDownload = "hana.settings.warnBeforeMobileDataDownload"
+    nonisolated static let downloadDirectoryBookmark = "hana.settings.downloadDirectoryBookmark"
     static let networkProxyMode = "hana.settings.networkProxyMode"
     static let networkProxyHost = "hana.settings.networkProxyHost"
     static let networkProxyPort = "hana.settings.networkProxyPort"
@@ -266,35 +267,93 @@ private enum HanaProxyDictionaryKey {
     static let socksPort = "SOCKSPort"
 }
 
-enum HanaDownloadDirectoryPreference {
+nonisolated enum HanaDownloadDirectoryError: LocalizedError, Equatable {
+    case invalidBookmark
+    case staleBookmark
+    case accessDenied
+    case directoryNotConfigured
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidBookmark:
+            "外部下载目录授权已损坏，请重新选择目录。"
+        case .staleBookmark:
+            "外部下载目录授权已失效，请重新选择目录。"
+        case .accessDenied:
+            "无法访问外部下载目录，请重新选择该目录后再试。"
+        case .directoryNotConfigured:
+            "请先选择外部下载目录。"
+        }
+    }
+}
+
+nonisolated enum HanaDownloadDirectoryPreference {
+    typealias BookmarkResolver = (Data) throws -> (url: URL, isStale: Bool)
+
     nonisolated static func saveExternalDirectory(_ url: URL, defaults: UserDefaults = .standard) throws {
+#if os(macOS)
+        let options: URL.BookmarkCreationOptions = [.withSecurityScope]
+#else
+        let options: URL.BookmarkCreationOptions = []
+#endif
         let bookmarkData = try url.bookmarkData(
-            options: [],
+            options: options,
             includingResourceValuesForKeys: nil,
             relativeTo: nil
         )
-        defaults.set(bookmarkData, forKey: "hana.settings.downloadDirectoryBookmark")
+        defaults.set(bookmarkData, forKey: HanaSettingsKey.downloadDirectoryBookmark)
     }
 
     nonisolated static func clear(defaults: UserDefaults = .standard) {
-        defaults.removeObject(forKey: "hana.settings.downloadDirectoryBookmark")
+        defaults.removeObject(forKey: HanaSettingsKey.downloadDirectoryBookmark)
     }
 
-    nonisolated static func resolvedExternalDirectory(defaults: UserDefaults = .standard) -> URL? {
-        guard let data = defaults.data(forKey: "hana.settings.downloadDirectoryBookmark") else {
+    nonisolated static func hasExternalDirectoryBookmark(defaults: UserDefaults = .standard) -> Bool {
+        defaults.data(forKey: HanaSettingsKey.downloadDirectoryBookmark) != nil
+    }
+
+    nonisolated static func resolvedExternalDirectory(
+        defaults: UserDefaults = .standard,
+        resolver: BookmarkResolver? = nil
+    ) throws -> URL? {
+        guard let data = defaults.data(forKey: HanaSettingsKey.downloadDirectoryBookmark) else {
             return nil
         }
-        var isStale = false
-        return try? URL(
-            resolvingBookmarkData: data,
-            options: [.withoutUI],
-            relativeTo: nil,
-            bookmarkDataIsStale: &isStale
-        )
+
+        let resolution: (url: URL, isStale: Bool)
+        do {
+            resolution = try (resolver ?? resolveBookmark)(data)
+        } catch {
+            throw HanaDownloadDirectoryError.invalidBookmark
+        }
+        guard !resolution.isStale else {
+            throw HanaDownloadDirectoryError.staleBookmark
+        }
+        return resolution.url
     }
 
     nonisolated static func displayName(defaults: UserDefaults = .standard) -> String {
-        resolvedExternalDirectory(defaults: defaults)?.lastPathComponent ?? "应用目录"
+        do {
+            return try resolvedExternalDirectory(defaults: defaults)?.lastPathComponent ?? "应用目录"
+        } catch {
+            return "需要重新选择"
+        }
+    }
+
+    private nonisolated static func resolveBookmark(_ data: Data) throws -> (url: URL, isStale: Bool) {
+        var isStale = false
+#if os(macOS)
+        let options: URL.BookmarkResolutionOptions = [.withSecurityScope, .withoutUI]
+#else
+        let options: URL.BookmarkResolutionOptions = [.withoutUI]
+#endif
+        let url = try URL(
+            resolvingBookmarkData: data,
+            options: options,
+            relativeTo: nil,
+            bookmarkDataIsStale: &isStale
+        )
+        return (url, isStale)
     }
 }
 

@@ -32,9 +32,15 @@ final class HanaHTTPClient {
     let baseURL: URL
 
     private let session: URLSession
+    private let sessionCookieStore: HanaSessionCookieStore
 
-    init(baseURL: URL, session: URLSession? = nil) {
+    init(
+        baseURL: URL,
+        sessionCookieStore: HanaSessionCookieStore,
+        session: URLSession? = nil
+    ) {
         self.baseURL = baseURL
+        self.sessionCookieStore = sessionCookieStore
         if let session {
             self.session = session
         } else {
@@ -238,7 +244,7 @@ final class HanaHTTPClient {
         }
 
         if isSiteURL(url),
-           let storedCookieHeader = SiteWebSession.storedCookieHeader(for: baseURL) {
+           let storedCookieHeader = sessionCookieStore.cookieHeader(for: baseURL) {
             for pair in cookiePairs(from: storedCookieHeader)
             where pair.name != HanaVideoLanguagePreference.cookieName && !names.contains(pair.name) {
                 names.insert(pair.name)

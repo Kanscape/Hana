@@ -13,6 +13,27 @@ enum HanimeParseError: LocalizedError {
 }
 
 struct HanimeHTMLParser {
+    private struct HomeRecommendationDescriptor {
+        let key: String
+        let title: String
+        let sourceIndex: Int
+    }
+
+    private static let homeRecommendationDescriptors = [
+        HomeRecommendationDescriptor(key: "latest_hanime", title: "最新里番", sourceIndex: 2),
+        HomeRecommendationDescriptor(key: "latest_release", title: "最新上市", sourceIndex: 0),
+        HomeRecommendationDescriptor(key: "latest_upload", title: "最新上传", sourceIndex: 1),
+        HomeRecommendationDescriptor(key: "watching_now", title: "他们在看", sourceIndex: 13),
+        HomeRecommendationDescriptor(key: "short_episode", title: "泡面番", sourceIndex: 3),
+        HomeRecommendationDescriptor(key: "motion_anime", title: "动态动画", sourceIndex: 5),
+        HomeRecommendationDescriptor(key: "3d_cg", title: "3D作品", sourceIndex: 6),
+        HomeRecommendationDescriptor(key: "2_5d", title: "2.5D", sourceIndex: 7),
+        HomeRecommendationDescriptor(key: "2d_anime", title: "2D动画", sourceIndex: 8),
+        HomeRecommendationDescriptor(key: "ai_generated", title: "AI生成", sourceIndex: 10),
+        HomeRecommendationDescriptor(key: "mmd", title: "MMD", sourceIndex: 11),
+        HomeRecommendationDescriptor(key: "cosplay", title: "Cosplay", sourceIndex: 12)
+    ]
+
     let baseURL: URL
 
     func parseHome(_ html: String) throws -> HanimeHomePage {
@@ -20,13 +41,20 @@ struct HanimeHTMLParser {
         let banner = try parseBanner(from: body)
         let rowElements = try body.select("div[id=home-rows-wrapper] > div").array()
 
-        let sections = try rowElements.enumerated().compactMap { index, element -> HanimeHomeSection? in
+        let sections = try Self.homeRecommendationDescriptors.compactMap { descriptor -> HanimeHomeSection? in
+            guard rowElements.indices.contains(descriptor.sourceIndex) else { return nil }
+            let element = rowElements[descriptor.sourceIndex]
             let videos = try parseVideoCards(in: element)
             guard !videos.isEmpty else { return nil }
             return HanimeHomeSection(
-                title: try sectionTitle(for: element, index: index),
+                key: descriptor.key,
+                title: descriptor.title,
                 videos: videos
             )
+        }
+
+        guard !sections.isEmpty else {
+            throw HanimeParseError.missingRequiredField("home recommendations")
         }
 
         return HanimeHomePage(banner: banner, sections: sections)
@@ -155,6 +183,7 @@ struct HanimeHTMLParser {
 
         let resolutions = try parseResolutionLinks(from: body)
         let relatedVideos = try parseRelatedVideos(from: body)
+        let series = try parseVideoSeries(from: body, currentVideoCode: videoCode)
         let csrfToken = try body.select("input[name=_token]").first()?.attr("value").trimmedNonEmpty()
         let currentUserID = try body.select("input[name=like-user-id]").first()?.attr("value").trimmedNonEmpty()
         let likeStatus = try body.select("[name=like-status]").first()?.attr("value").trimmedNonEmpty()
@@ -174,6 +203,7 @@ struct HanimeHTMLParser {
             tags: tags,
             resolutions: resolutions,
             relatedVideos: relatedVideos,
+            series: series,
             originalComicURL: originalComicURL,
             favoriteCount: favoriteCount,
             isFavorite: likeStatus != nil,
@@ -252,28 +282,16 @@ struct HanimeHTMLParser {
         )
     }
 
-    private func sectionTitle(for element: Element, index: Int) throws -> String {
-        if let title = try element.select("h2, h3, h4, .home-rows-title").first()?.text().trimmedNonEmpty() {
-            return title
-        }
-
-        let knownTitles = [
-            "最新上市", "最新上传", "里番", "泡面番", "Motion Anime", "3DCG",
-            "2.5D", "2D", "AI 生成", "MMD", "Cosplay", "他们在看", "新番预告"
-        ]
-        return knownTitles.indices.contains(index) ? knownTitles[index] : "分区 \(index + 1)"
-    }
-
     private func parseVideoCards(in element: Element) throws -> [HanimeInfo] {
         let normalCards = try parseNormalCards(in: element)
         if !normalCards.isEmpty {
-            return normalCards
+            return normalCards.deduplicatedByVideoCode()
         }
-        return try parseSimplifiedCards(in: element)
+        return try parseSimplifiedCards(in: element).deduplicatedByVideoCode()
     }
 
     private func parseNormalCards(in root: Element) throws -> [HanimeInfo] {
-        try root.select("div[class^=horizontal-card]")
+        try root.select("div[class^=horizontal-card], div.pure-grid-card")
             .array()
             .compactMap(parseNormalCard)
             .deduplicatedByVideoCode()
@@ -289,14 +307,20 @@ struct HanimeHTMLParser {
     private func parseSimplifiedCards(in root: Element) throws -> [HanimeInfo] {
         var videos = [HanimeInfo]()
         for link in try root.select("a[href]").array() {
-            guard let info = try parseSimplifiedCard(from: link) else { continue }
+            guard try link.select("div.home-rows-videos-div").first() != nil,
+                  let info = try parseSimplifiedCard(from: link) else {
+                continue
+            }
             videos.append(info)
         }
         return videos.deduplicatedByVideoCode()
     }
 
     private func parseNormalCard(from element: Element) throws -> HanimeInfo? {
-        let title = try element.select("div.title, h4.video-title").first()?.text().trimmedNonEmpty()
+        let title = try element.select("div.title, h4.video-title, div.grid-title")
+            .first()?
+            .text()
+            .trimmedNonEmpty()
             ?? (try element.select("img").first()?.attr("alt").trimmedNonEmpty())
             ?? (try element.attr("title").trimmedNonEmpty())
         let coverURL = try firstURL(from: element.select("img").first(), attribute: "src")
@@ -305,12 +329,20 @@ struct HanimeHTMLParser {
 
         guard let title, let code else { return nil }
 
-        let thumbContainer = try element.select("div[class^=thumb-container]")
-        let duration = try thumbContainer.select("div[class^=duration]").text().trimmedNonEmpty()
-        let stats = try thumbContainer.select("div[class^=stat-item]").array()
+        let thumbContainer = try element.select("div[class^=thumb-container], div.grid-thumb-container").first()
+        let duration = try thumbContainer?
+            .select("div[class^=duration], div.grid-duration")
+            .first()?
+            .text()
+            .trimmedNonEmpty()
+        let stats = try thumbContainer?
+            .select("div[class^=stat-item], div.grid-stat-item")
+            .array() ?? []
         let views = try stats.dropFirst().first?.text().trimmedNonEmpty()
 
-        let artistAndUploadTime = try element.select("div.subtitle a, div.video-meta-data a")
+        let artistAndUploadTime = try element.select(
+            "div.subtitle a, div.video-meta-data a, div.grid-subtitle a"
+        )
             .first()?
             .text()
             .trimmedNonEmpty()
@@ -440,6 +472,157 @@ struct HanimeHTMLParser {
             return []
         }
         return try parseVideoCards(in: relatedRoot)
+    }
+
+    private func parseVideoSeries(from body: Element, currentVideoCode: String) throws -> HanimeVideoSeries? {
+        let wrapper = try body.select("div.video-playlist-wrapper").first()
+            ?? body.getElementById("video-playlist-wrapper")
+        guard let wrapper,
+              let scroll = try wrapper.getElementById("playlist-scroll") else {
+            return nil
+        }
+
+        let children = scroll.children().array()
+        let newCards = children.filter { $0.hasClass("playlist-hover-wrap") }
+        let candidates: [HanimeSeriesVideo]
+        if !newCards.isEmpty {
+            candidates = try newCards.compactMap(parseNewSeriesVideo)
+        } else {
+            candidates = try children.compactMap { element in
+                return try parseLegacySeriesVideo(from: element)
+            }
+        }
+
+        let videos = normalizedSeriesVideos(candidates, currentVideoCode: currentVideoCode)
+        guard !videos.isEmpty else { return nil }
+
+        let title = try wrapper.select("#playlist-top-block h4 a").first()?.text().trimmedNonEmpty()
+            ?? wrapper.select("#playlist-top-block h4").first()?.text().trimmedNonEmpty()
+            ?? wrapper.select("div > div > h4").first()?.text().trimmedNonEmpty()
+        return HanimeVideoSeries(title: title, videos: videos)
+    }
+
+    private func parseNewSeriesVideo(from element: Element) throws -> HanimeSeriesVideo? {
+        var href = try element.attr("data-href").trimmedNonEmpty()
+        if href == nil {
+            href = try primaryVideoLink(in: element)
+        }
+        guard let videoCode = href.flatMap(videoCode(from:)) else { return nil }
+
+        let title = try element.select("h4.video-title a, h4.video-title").first()?.text().trimmedNonEmpty()
+            ?? element.select("img.main-thumb, img").first()?.attr("alt").trimmedNonEmpty()
+        guard let title else { return nil }
+
+        let thumbnail = try element.select(".thumb-container").first() ?? element
+        let stats = try thumbnail.select(".stat-item").array()
+        return HanimeSeriesVideo(
+            videoCode: videoCode,
+            title: title,
+            coverURL: try firstURL(from: thumbnail.select("img.main-thumb, img").first(), attribute: "src"),
+            duration: try thumbnail.select(".duration").first()?.text().trimmedNonEmpty(),
+            views: try stats.dropFirst().first?.text().trimmedNonEmpty(),
+            rating: stats.first?.ownText().trimmedNonEmpty(),
+            author: try element.select(".meta-author a").first()?.text().trimmedNonEmpty(),
+            category: try element.select(".meta-stats a").first()?.text().trimmedNonEmpty(),
+            uploadTime: try element.select(".meta-stats span").first()?.text().trimmedNonEmpty(),
+            isCurrent: element.hasClass("videos-scroll")
+        )
+    }
+
+    private func parseLegacySeriesVideo(from element: Element) throws -> HanimeSeriesVideo? {
+        var href: String?
+        if element.tagName() == "a" {
+            href = try element.attr("abs:href").trimmedNonEmpty()
+                ?? element.attr("href").trimmedNonEmpty()
+        }
+        if href == nil {
+            href = try primaryVideoLink(in: element)
+        }
+
+        guard let href,
+              let videoCode = videoCode(from: href) else {
+            return nil
+        }
+
+        let panel = try element.select("div[class^=card-mobile-panel]").first() ?? element
+        let images = try panel.select("img").array()
+        let image = images.dropFirst().first ?? images.first
+        let title = try image?.attr("alt").trimmedNonEmpty()
+            ?? panel.select("h4.video-title, .card-mobile-title").first()?.text().trimmedNonEmpty()
+        guard let title else { return nil }
+
+        let metadata = try panel.select("div[class*=card-mobile-duration]").array()
+        let panelText = try panel.text()
+        return HanimeSeriesVideo(
+            videoCode: videoCode,
+            title: title,
+            coverURL: try firstURL(from: image, attribute: "src"),
+            duration: try metadata.first?.text().trimmedNonEmpty(),
+            views: try metadata.dropFirst(2).first?.text().trimmedNonEmpty(),
+            rating: try panel.select("div.card-mobile-duration.card-playlist-large").first()?.ownText().trimmedNonEmpty(),
+            author: try panel.select("a.card-mobile-user").first()?.text().trimmedNonEmpty(),
+            category: try panel.select(".meta-stats a").first()?.text().trimmedNonEmpty(),
+            uploadTime: try panel.select(".meta-stats span").first()?.text().trimmedNonEmpty(),
+            isCurrent: element.hasClass("videos-scroll") || panelText.contains("播放")
+        )
+    }
+
+    private func normalizedSeriesVideos(
+        _ candidates: [HanimeSeriesVideo],
+        currentVideoCode: String
+    ) -> [HanimeSeriesVideo] {
+        var videos: [HanimeSeriesVideo] = []
+        var indexByCode: [String: Int] = [:]
+
+        for candidate in candidates {
+            if let index = indexByCode[candidate.videoCode] {
+                videos[index] = mergeSeriesVideo(videos[index], with: candidate)
+            } else {
+                indexByCode[candidate.videoCode] = videos.count
+                videos.append(candidate)
+            }
+        }
+
+        if videos.contains(where: { $0.videoCode == currentVideoCode }) {
+            return videos.map { seriesVideo($0, isCurrent: $0.videoCode == currentVideoCode) }
+        }
+        guard let currentIndex = videos.firstIndex(where: \.isCurrent) else { return videos }
+        return videos.enumerated().map { index, video in
+            seriesVideo(video, isCurrent: index == currentIndex)
+        }
+    }
+
+    private func mergeSeriesVideo(
+        _ first: HanimeSeriesVideo,
+        with duplicate: HanimeSeriesVideo
+    ) -> HanimeSeriesVideo {
+        HanimeSeriesVideo(
+            videoCode: first.videoCode,
+            title: first.title,
+            coverURL: first.coverURL ?? duplicate.coverURL,
+            duration: first.duration ?? duplicate.duration,
+            views: first.views ?? duplicate.views,
+            rating: first.rating ?? duplicate.rating,
+            author: first.author ?? duplicate.author,
+            category: first.category ?? duplicate.category,
+            uploadTime: first.uploadTime ?? duplicate.uploadTime,
+            isCurrent: first.isCurrent || duplicate.isCurrent
+        )
+    }
+
+    private func seriesVideo(_ video: HanimeSeriesVideo, isCurrent: Bool) -> HanimeSeriesVideo {
+        HanimeSeriesVideo(
+            videoCode: video.videoCode,
+            title: video.title,
+            coverURL: video.coverURL,
+            duration: video.duration,
+            views: video.views,
+            rating: video.rating,
+            author: video.author,
+            category: video.category,
+            uploadTime: video.uploadTime,
+            isCurrent: isCurrent
+        )
     }
 
     private func parseArtist(from body: Element) throws -> HanimeArtist? {

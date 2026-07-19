@@ -330,14 +330,27 @@ struct DownloadsScreen: View {
     }
 
     private func delete(items: [DownloadQueueRecord]) {
+        var firstError: Error?
         for item in items {
             services.downloadClient.cancel(id: item.id)
             if let localURL = localFileURL(for: item) {
-                try? services.downloadClient.deleteLocalDownload(fileURL: localURL)
+                do {
+                    try services.downloadClient.deleteLocalDownload(fileURL: localURL)
+                } catch {
+                    firstError = firstError ?? error
+                    continue
+                }
             }
             modelContext.delete(item)
         }
-        try? modelContext.save()
+        do {
+            try modelContext.save()
+        } catch {
+            firstError = firstError ?? error
+        }
+        if let firstError {
+            alertMessage = .error(firstError.localizedDescription)
+        }
     }
 
     private var downloadGroupNames: [String] {
@@ -454,8 +467,7 @@ struct DownloadsScreen: View {
 
     private func localFileURL(for item: DownloadQueueRecord) -> URL? {
         guard let localFileURLString = item.localFileURLString,
-              let url = URL(string: localFileURLString),
-              FileManager.default.fileExists(atPath: url.path) else {
+              let url = URL(string: localFileURLString) else {
             return nil
         }
         return url
