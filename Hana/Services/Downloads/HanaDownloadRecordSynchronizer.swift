@@ -17,23 +17,32 @@ enum HanaDownloadRecordSynchronizer {
             modelContext: modelContext,
             records: &records
         ) || changed
-        changed = importLocalDownloads(
-            downloadClient: downloadClient,
-            modelContext: modelContext,
-            records: &records
-        ) || changed
+        let localDownloads: [HanimeLocalDownload]? = if downloadClient.externalDirectoryAccessError == nil {
+            try? downloadClient.localDownloads()
+        } else {
+            nil
+        }
+        if let localDownloads {
+            changed = importLocalDownloads(
+                files: localDownloads,
+                modelContext: modelContext,
+                records: &records
+            ) || changed
+        }
         changed = recoverInterruptedDownloads(
             downloadClient: downloadClient,
             records: records
         ) || changed
-        changed = deleteDuplicateRecords(
-            modelContext: modelContext,
-            records: &records
-        ) || changed
-        changed = deleteMissingCompletedRecords(
-            modelContext: modelContext,
-            records: &records
-        ) || changed
+        if localDownloads != nil {
+            changed = deleteDuplicateRecords(
+                modelContext: modelContext,
+                records: &records
+            ) || changed
+            changed = deleteMissingCompletedRecords(
+                modelContext: modelContext,
+                records: &records
+            ) || changed
+        }
 
         if changed {
             try? modelContext.save()
@@ -70,7 +79,7 @@ enum HanaDownloadRecordSynchronizer {
                 quality: request.quality,
                 mediaURLString: request.mediaURL.absoluteString,
                 createdAt: snapshot.createdAt,
-                status: downloadStatusTitle(for: snapshot.status)
+                status: downloadStatusTitle(for: snapshot)
             )
             apply(snapshot, to: record)
             modelContext.insert(record)
@@ -82,11 +91,11 @@ enum HanaDownloadRecordSynchronizer {
 
     @discardableResult
     static func importLocalDownloads(
-        downloadClient: HanimeDownloadClient,
+        files: [HanimeLocalDownload],
         modelContext: ModelContext,
         records: inout [DownloadQueueRecord]
     ) -> Bool {
-        guard let files = try? downloadClient.localDownloads(), !files.isEmpty else {
+        guard !files.isEmpty else {
             return false
         }
 
@@ -139,9 +148,8 @@ enum HanaDownloadRecordSynchronizer {
         var changed = false
         for record in records where !downloadClient.isDownloading(id: record.id) {
             guard record.status == "下载中" || record.status == "重试中" else { continue }
-            record.status = "等待下载"
-            record.progress = 0
-            record.errorMessage = "上次下载中断，可重新开始。"
+            record.status = "暂时失败"
+            record.errorMessage = "后台任务已结束，可重新开始下载。"
             changed = true
         }
         return changed
@@ -158,11 +166,23 @@ enum HanaDownloadRecordSynchronizer {
         record.progress = snapshot.progress
 
         switch snapshot.status {
+        case .queued:
+            guard record.status != "已完成" else { return }
+            record.status = "等待下载"
+            record.localFileURLString = nil
+            record.errorMessage = snapshot.errorDescription
+            record.completedAt = nil
         case .running:
             guard record.status != "已完成" else { return }
             record.status = "下载中"
             record.localFileURLString = nil
-            record.errorMessage = progressMessage(for: snapshot)
+            record.errorMessage = snapshot.errorDescription ?? progressMessage(for: snapshot)
+            record.completedAt = nil
+        case .paused:
+            guard record.status != "已完成" else { return }
+            record.status = "已暂停"
+            record.localFileURLString = nil
+            record.errorMessage = snapshot.errorDescription
             record.completedAt = nil
         case .completed:
             record.status = "已完成"
@@ -172,21 +192,25 @@ enum HanaDownloadRecordSynchronizer {
             record.errorMessage = snapshot.downloadedByteCount.map { ByteCountFormatStyle().format($0) }
         case .failed:
             guard record.status != "已完成" else { return }
-            record.status = "下载失败"
+            record.status = snapshot.failureKind == .transient ? "暂时失败" : "下载失败"
             record.errorMessage = snapshot.errorDescription
-            record.completedAt = snapshot.completedAt
+            record.completedAt = nil
         case .cancelled:
             guard record.status != "已完成" else { return }
             record.status = "已取消"
             record.errorMessage = nil
-            record.completedAt = snapshot.completedAt
+            record.completedAt = nil
         }
     }
 
     static func downloadStatusTitle(for status: HanimeDownloadTaskStatus) -> String {
         switch status {
+        case .queued:
+            "等待下载"
         case .running:
             "下载中"
+        case .paused:
+            "已暂停"
         case .completed:
             "已完成"
         case .failed:
@@ -194,6 +218,13 @@ enum HanaDownloadRecordSynchronizer {
         case .cancelled:
             "已取消"
         }
+    }
+
+    static func downloadStatusTitle(for snapshot: HanimePersistedDownloadTask) -> String {
+        if snapshot.status == .failed, snapshot.failureKind == .transient {
+            return "暂时失败"
+        }
+        return downloadStatusTitle(for: snapshot.status)
     }
 
     private static func matchingRecords(

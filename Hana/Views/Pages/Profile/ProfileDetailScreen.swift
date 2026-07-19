@@ -98,7 +98,7 @@ struct ProfileDetailScreen: View {
         Section("账号") {
             if services.siteSession.isLoggedIn {
                 Button(role: .destructive) {
-                    services.logout()
+                    Task { await services.logout() }
                 } label: {
                     Label("退出登录", systemImage: "rectangle.portrait.and.arrow.right")
                 }
