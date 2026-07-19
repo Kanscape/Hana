@@ -8,6 +8,8 @@ struct VideoDetailScreen: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @AppStorage(HanaSettingsKey.defaultVideoQuality) private var defaultVideoQuality = HanaVideoQualityPreference.defaultValue.rawValue
+    @AppStorage(HanaSettingsKey.startDownloadsImmediately) private var startDownloadsImmediately = true
+    @AppStorage(HanaSettingsKey.warnBeforeMobileDataDownload) private var warnBeforeMobileDataDownload = true
     let videoCode: String
     var isNavigationTop = true
     @State private var state: LoadableState<HanimeVideo> = .idle
@@ -17,6 +19,7 @@ struct VideoDetailScreen: View {
     @State private var activePlayer: AVPlayer?
     @State private var isPlayerFullscreenPresented = false
     @State private var addedDownloadLinkID: String?
+    @State private var pendingAutomaticDownload: DownloadQueueRecord?
 
     private var displayVideo: HanimeVideo? {
         switch state {
@@ -59,10 +62,21 @@ struct VideoDetailScreen: View {
             activePlayer = nil
             isPlayerFullscreenPresented = false
             addedDownloadLinkID = nil
+            pendingAutomaticDownload = nil
             Task { await loadVideoIfNeeded() }
         }
         .onChange(of: services.siteSession.lastCookieSyncAt) {
             Task { await reloadAfterCookieSyncIfNeeded() }
+        }
+        .alert("当前网络可能按流量计费", isPresented: automaticDownloadMobileDataAlertBinding) {
+            Button("继续下载") {
+                continueAutomaticDownload()
+            }
+            Button("稍后下载", role: .cancel) {
+                pendingAutomaticDownload = nil
+            }
+        } message: {
+            Text("设置里开启了蜂窝网络下载前提醒。")
         }
     }
 
@@ -378,6 +392,42 @@ struct VideoDetailScreen: View {
         )
         modelContext.insert(record)
         try? modelContext.save()
+
+        guard startDownloadsImmediately else { return }
+        startAutomaticDownload(record)
+    }
+
+    private func startAutomaticDownload(_ record: DownloadQueueRecord) {
+        if warnBeforeMobileDataDownload && services.networkMonitor.shouldTreatAsMetered {
+            pendingAutomaticDownload = record
+            return
+        }
+        Task { await startDownload(record) }
+    }
+
+    private func continueAutomaticDownload() {
+        guard let record = pendingAutomaticDownload else { return }
+        pendingAutomaticDownload = nil
+        Task { await startDownload(record) }
+    }
+
+    private func startDownload(_ record: DownloadQueueRecord) async {
+        await HanaDownloadStarter.start(
+            record,
+            downloadClient: services.downloadClient,
+            siteSession: services.siteSession,
+            modelContext: modelContext
+        )
+    }
+
+    private var automaticDownloadMobileDataAlertBinding: Binding<Bool> {
+        Binding {
+            pendingAutomaticDownload != nil
+        } set: { isPresented in
+            if !isPresented {
+                pendingAutomaticDownload = nil
+            }
+        }
     }
 }
 

@@ -22,6 +22,7 @@ let package = Package(
                 "ContentView.swift",
                 "Hana.entitlements",
                 "HanaApp.swift",
+                "Models/DownloadGroupExpansionState.swift",
                 "PrivacyInfo.xcprivacy",
                 "Models/HanaSettings.swift",
                 "Models/HanimeModels.swift",

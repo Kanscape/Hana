@@ -29,10 +29,37 @@ nonisolated struct HanimeLocalDownload: Identifiable, Hashable, Sendable {
 }
 
 nonisolated enum HanimeDownloadTaskStatus: String, Codable, Sendable {
+    case queued
     case running
+    case paused
     case completed
     case failed
     case cancelled
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        let rawValue = try container.decode(String.self)
+        self = Self(rawValue: rawValue) ?? .failed
+    }
+}
+
+nonisolated enum HanimeDownloadFailureKind: String, Codable, Sendable {
+    case transient
+    case permanent
+}
+
+nonisolated enum HanimeDownloadError: LocalizedError, Sendable {
+    case paused
+    case alreadyScheduled
+
+    var errorDescription: String? {
+        switch self {
+        case .paused:
+            "下载已暂停"
+        case .alreadyScheduled:
+            "下载任务已在队列中"
+        }
+    }
 }
 
 nonisolated struct HanimePersistedDownloadTask: Codable, Identifiable, Sendable {
@@ -50,6 +77,10 @@ nonisolated struct HanimePersistedDownloadTask: Codable, Identifiable, Sendable 
     var updatedAt: Date
     var completedAt: Date?
     var notificationSentAt: Date?
+    var resumeData: Data? = nil
+    var failureKind: HanimeDownloadFailureKind? = nil
+    var queuePosition: Int64? = nil
+    var createdFromResumeData: Bool? = nil
 }
 
 nonisolated struct HanimeDownloadManifest: Codable, Sendable {
@@ -448,11 +479,13 @@ nonisolated struct HanimeDownloadFileStore {
     ]
 }
 
-nonisolated private struct HanimeDownloadTaskStateStore {
+nonisolated struct HanimeDownloadTaskStateStore {
     let fileManager: FileManager
+    let stateDirectoryURLOverride: URL?
 
-    init(fileManager: FileManager = .default) {
+    init(fileManager: FileManager = .default, stateDirectoryURL: URL? = nil) {
         self.fileManager = fileManager
+        self.stateDirectoryURLOverride = stateDirectoryURL
     }
 
     func allTasks() throws -> [HanimePersistedDownloadTask] {
@@ -464,12 +497,66 @@ nonisolated private struct HanimeDownloadTaskStateStore {
     }
 
     @discardableResult
+    func markQueued(
+        request: HanimeDownloadRequest,
+        sessionIdentifier: String,
+        clearResumeData: Bool = false,
+        errorDescription: String? = nil,
+        preserveQueuePosition: Bool = false,
+        atFront: Bool = false
+    ) throws -> HanimePersistedDownloadTask {
+        var tasks = try readTasks()
+        let now = Date()
+        let previous = tasks.first { $0.id == request.id }
+        var task = previous ?? HanimePersistedDownloadTask(
+            id: request.id,
+            request: request,
+            sessionIdentifier: sessionIdentifier,
+            taskIdentifier: nil,
+            status: .queued,
+            progress: 0,
+            downloadedByteCount: nil,
+            expectedByteCount: nil,
+            localFileURLString: nil,
+            errorDescription: nil,
+            createdAt: now,
+            updatedAt: now,
+            completedAt: nil,
+            notificationSentAt: nil
+        )
+        task.request = request
+        task.sessionIdentifier = sessionIdentifier
+        task.taskIdentifier = nil
+        task.status = .queued
+        task.localFileURLString = nil
+        task.errorDescription = errorDescription
+        task.failureKind = nil
+        task.createdFromResumeData = nil
+        task.updatedAt = now
+        task.completedAt = nil
+        task.notificationSentAt = nil
+        if !preserveQueuePosition || task.queuePosition == nil {
+            task.queuePosition = nextQueuePosition(in: tasks, atFront: atFront)
+        }
+        if clearResumeData {
+            task.resumeData = nil
+        }
+        if task.resumeData == nil {
+            resetTransferState(&task)
+        }
+        replace(task, in: &tasks)
+        try writeTasks(tasks)
+        return task
+    }
+
+    @discardableResult
     func markRunning(
         request: HanimeDownloadRequest,
         taskIdentifier: Int,
         sessionIdentifier: String,
         downloadedByteCount: Int64? = nil,
-        expectedByteCount: Int64? = nil
+        expectedByteCount: Int64? = nil,
+        createdFromResumeData: Bool = false
     ) throws -> HanimePersistedDownloadTask {
         var tasks = try readTasks()
         let now = Date()
@@ -498,11 +585,13 @@ nonisolated private struct HanimeDownloadTaskStateStore {
         task.expectedByteCount = expectedByteCount ?? task.expectedByteCount
         task.progress = progress(downloaded: task.downloadedByteCount, expected: task.expectedByteCount) ?? task.progress
         task.localFileURLString = nil
-        task.errorDescription = nil
+        task.resumeData = nil
+        task.failureKind = nil
+        task.queuePosition = nil
+        task.createdFromResumeData = createdFromResumeData
         task.updatedAt = now
         task.completedAt = nil
-        tasks.removeAll { $0.id == request.id }
-        tasks.append(task)
+        replace(task, in: &tasks)
         try writeTasks(tasks)
         return task
     }
@@ -524,8 +613,118 @@ nonisolated private struct HanimeDownloadTaskStateStore {
         task.expectedByteCount = expectedByteCount > 0 ? expectedByteCount : nil
         task.progress = progress(downloaded: downloadedByteCount, expected: task.expectedByteCount) ?? task.progress
         task.updatedAt = .now
-        tasks.removeAll { $0.id == requestID }
-        tasks.append(task)
+        replace(task, in: &tasks)
+        try writeTasks(tasks)
+        return task
+    }
+
+    @discardableResult
+    func updateResumedProgress(
+        requestID: String,
+        taskIdentifier: Int,
+        fileOffset: Int64,
+        expectedByteCount: Int64
+    ) throws -> HanimePersistedDownloadTask? {
+        var tasks = try readTasks()
+        guard var task = tasks.first(where: { $0.id == requestID }) else {
+            return nil
+        }
+        let previousDownloadedByteCount = task.downloadedByteCount ?? 0
+        task.taskIdentifier = taskIdentifier
+        task.status = .running
+        task.downloadedByteCount = fileOffset
+        task.expectedByteCount = expectedByteCount > 0 ? expectedByteCount : nil
+        task.progress = progress(downloaded: fileOffset, expected: task.expectedByteCount) ?? task.progress
+        task.errorDescription = fileOffset == 0 && previousDownloadedByteCount > 0
+            ? "服务器不支持继续旧进度，已从头开始下载。"
+            : nil
+        task.updatedAt = .now
+        replace(task, in: &tasks)
+        try writeTasks(tasks)
+        return task
+    }
+
+    @discardableResult
+    func markPaused(
+        requestID: String,
+        resumeData: Data?,
+        preserveQueuePosition: Bool = false
+    ) throws -> HanimePersistedDownloadTask? {
+        var tasks = try readTasks()
+        guard var task = tasks.first(where: { $0.id == requestID }) else {
+            return nil
+        }
+        task.taskIdentifier = nil
+        task.status = .paused
+        task.resumeData = resumeData
+        task.failureKind = nil
+        task.createdFromResumeData = nil
+        if !preserveQueuePosition {
+            task.queuePosition = nil
+        }
+        task.localFileURLString = nil
+        task.errorDescription = resumeData == nil
+            ? "服务器未提供可恢复数据，再次开始会从头下载。"
+            : nil
+        task.updatedAt = .now
+        task.completedAt = nil
+        if resumeData == nil {
+            resetTransferState(&task)
+        }
+        replace(task, in: &tasks)
+        try writeTasks(tasks)
+        return task
+    }
+
+    @discardableResult
+    func markFailed(
+        requestID: String,
+        failureKind: HanimeDownloadFailureKind,
+        errorDescription: String,
+        resumeData: Data?
+    ) throws -> HanimePersistedDownloadTask? {
+        var tasks = try readTasks()
+        guard var task = tasks.first(where: { $0.id == requestID }) else {
+            return nil
+        }
+        task.taskIdentifier = nil
+        task.status = .failed
+        task.resumeData = resumeData
+        task.failureKind = failureKind
+        task.queuePosition = nil
+        task.createdFromResumeData = nil
+        task.localFileURLString = nil
+        task.errorDescription = resumeData == nil
+            ? "\(errorDescription)\n再次开始会从头下载。"
+            : errorDescription
+        task.updatedAt = .now
+        task.completedAt = nil
+        if resumeData == nil {
+            resetTransferState(&task)
+        }
+        replace(task, in: &tasks)
+        try writeTasks(tasks)
+        return task
+    }
+
+    @discardableResult
+    func markCancelled(requestID: String) throws -> HanimePersistedDownloadTask? {
+        var tasks = try readTasks()
+        guard var task = tasks.first(where: { $0.id == requestID }) else {
+            return nil
+        }
+        task.taskIdentifier = nil
+        task.status = .cancelled
+        task.localFileURLString = nil
+        task.errorDescription = nil
+        task.failureKind = nil
+        task.queuePosition = nil
+        task.createdFromResumeData = nil
+        task.updatedAt = .now
+        task.completedAt = nil
+        task.resumeData = nil
+        resetTransferState(&task)
+        replace(task, in: &tasks)
         try writeTasks(tasks)
         return task
     }
@@ -564,33 +763,13 @@ nonisolated private struct HanimeDownloadTaskStateStore {
         task.expectedByteCount = file.byteCount ?? task.expectedByteCount
         task.localFileURLString = file.fileURL.absoluteString
         task.errorDescription = nil
+        task.resumeData = nil
+        task.failureKind = nil
+        task.queuePosition = nil
+        task.createdFromResumeData = nil
         task.updatedAt = now
         task.completedAt = now
-        tasks.removeAll { $0.id == request.id }
-        tasks.append(task)
-        try writeTasks(tasks)
-        return task
-    }
-
-    @discardableResult
-    func markFinished(
-        requestID: String,
-        taskIdentifier: Int,
-        status: HanimeDownloadTaskStatus,
-        errorDescription: String?
-    ) throws -> HanimePersistedDownloadTask? {
-        var tasks = try readTasks()
-        guard var task = tasks.first(where: { $0.id == requestID }) else {
-            return nil
-        }
-        let now = Date()
-        task.taskIdentifier = taskIdentifier
-        task.status = status
-        task.errorDescription = errorDescription
-        task.updatedAt = now
-        task.completedAt = now
-        tasks.removeAll { $0.id == requestID }
-        tasks.append(task)
+        replace(task, in: &tasks)
         try writeTasks(tasks)
         return task
     }
@@ -600,9 +779,38 @@ nonisolated private struct HanimeDownloadTaskStateStore {
         guard var task = tasks.first(where: { $0.id == requestID }) else { return }
         task.notificationSentAt = sentAt
         task.updatedAt = .now
-        tasks.removeAll { $0.id == requestID }
-        tasks.append(task)
+        replace(task, in: &tasks)
         try writeTasks(tasks)
+    }
+
+    func removeTask(requestID: String) throws {
+        var tasks = try readTasks()
+        tasks.removeAll { $0.id == requestID }
+        try writeTasks(tasks)
+    }
+
+    @discardableResult
+    func markRequeuePending(requestID: String) throws -> HanimePersistedDownloadTask? {
+        var tasks = try readTasks()
+        guard var task = tasks.first(where: { $0.id == requestID }) else {
+            return nil
+        }
+        task.queuePosition = nextQueuePosition(in: tasks, atFront: false)
+        task.updatedAt = .now
+        replace(task, in: &tasks)
+        try writeTasks(tasks)
+        return task
+    }
+
+    private func replace(_ task: HanimePersistedDownloadTask, in tasks: inout [HanimePersistedDownloadTask]) {
+        tasks.removeAll { $0.id == task.id }
+        tasks.append(task)
+    }
+
+    private func resetTransferState(_ task: inout HanimePersistedDownloadTask) {
+        task.progress = 0
+        task.downloadedByteCount = nil
+        task.expectedByteCount = nil
     }
 
     private func progress(downloaded: Int64?, expected: Int64?) -> Double? {
@@ -612,6 +820,19 @@ nonisolated private struct HanimeDownloadTaskStateStore {
             return nil
         }
         return min(max(Double(downloaded) / Double(expected), 0), 1)
+    }
+
+    private func nextQueuePosition(
+        in tasks: [HanimePersistedDownloadTask],
+        atFront: Bool
+    ) -> Int64 {
+        let positions = tasks.compactMap(\.queuePosition)
+        if atFront {
+            guard let position = positions.min() else { return 0 }
+            return position == .min ? .min : position - 1
+        }
+        guard let position = positions.max() else { return 0 }
+        return position == .max ? .max : position + 1
     }
 
     private func readTasks() throws -> [HanimePersistedDownloadTask] {
@@ -635,12 +856,17 @@ nonisolated private struct HanimeDownloadTaskStateStore {
     }
 
     private func stateURL(create: Bool) throws -> URL {
-        let rootURL = try fileManager.url(
-            for: .applicationSupportDirectory,
-            in: .userDomainMask,
-            appropriateFor: nil,
-            create: create
-        ).appending(path: "HanaDownloads", directoryHint: .isDirectory)
+        let rootURL: URL
+        if let stateDirectoryURLOverride {
+            rootURL = stateDirectoryURLOverride
+        } else {
+            rootURL = try fileManager.url(
+                for: .applicationSupportDirectory,
+                in: .userDomainMask,
+                appropriateFor: nil,
+                create: create
+            ).appending(path: "HanaDownloads", directoryHint: .isDirectory)
+        }
         if create {
             try fileManager.createDirectory(at: rootURL, withIntermediateDirectories: true)
         }
@@ -650,9 +876,11 @@ nonisolated private struct HanimeDownloadTaskStateStore {
 
 private final class HanimeBackgroundDownloadDelegate: NSObject, URLSessionDownloadDelegate {
     private weak var client: HanimeDownloadClient?
+    private let fileStore: HanimeDownloadFileStore
 
-    init(client: HanimeDownloadClient) {
+    init(client: HanimeDownloadClient, fileStore: HanimeDownloadFileStore) {
         self.client = client
+        self.fileStore = fileStore
     }
 
     nonisolated func urlSession(
@@ -681,6 +909,25 @@ private final class HanimeBackgroundDownloadDelegate: NSObject, URLSessionDownlo
     nonisolated func urlSession(
         _ session: URLSession,
         downloadTask: URLSessionDownloadTask,
+        didResumeAtOffset fileOffset: Int64,
+        expectedTotalBytes: Int64
+    ) {
+        guard let request = HanimeDownloadClient.request(from: downloadTask) else {
+            return
+        }
+        Task { @MainActor [weak client] in
+            client?.updateResumedProgress(
+                requestID: request.id,
+                taskIdentifier: downloadTask.taskIdentifier,
+                fileOffset: fileOffset,
+                expectedByteCount: expectedTotalBytes
+            )
+        }
+    }
+
+    nonisolated func urlSession(
+        _ session: URLSession,
+        downloadTask: URLSessionDownloadTask,
         didFinishDownloadingTo location: URL
     ) {
         guard let request = HanimeDownloadClient.request(from: downloadTask),
@@ -699,7 +946,7 @@ private final class HanimeBackgroundDownloadDelegate: NSObject, URLSessionDownlo
             guard (200..<300).contains(response.statusCode) else {
                 throw HanaNetworkError.httpStatus(response.statusCode, request.mediaURL)
             }
-            let file = try HanimeDownloadFileStore().moveDownloadedFile(
+            let file = try fileStore.moveDownloadedFile(
                 from: location,
                 response: response,
                 request: request
@@ -755,38 +1002,83 @@ private final class HanimeBackgroundDownloadDelegate: NSObject, URLSessionDownlo
     }
 }
 
+private enum HanimeDownloadTaskIntent {
+    case pause
+    case cancel
+    case requeue
+}
+
+private enum HanimeDownloadTaskCreationMode {
+    case fresh
+    case resumed
+}
+
 @Observable
 final class HanimeDownloadClient {
     static let backgroundSessionIdentifier = "com.kanscape.Hana.downloads"
     private static let backgroundEventsNotification = Notification.Name("HanaDownloadClientBackgroundEvents")
 
     private let httpClient: HanaHTTPClient
-    private let session: URLSession
-    private let fileManager: FileManager
+    private let defaults: UserDefaults
+    private let sessionConfigurationOverride: URLSessionConfiguration?
+    private let backgroundTasksProviderOverride: (@Sendable () async -> [URLSessionTask])?
     private let fileStore: HanimeDownloadFileStore
     private let stateStore: HanimeDownloadTaskStateStore
-    @ObservationIgnored private lazy var backgroundDelegate = HanimeBackgroundDownloadDelegate(client: self)
+    @ObservationIgnored private lazy var backgroundDelegate = HanimeBackgroundDownloadDelegate(
+        client: self,
+        fileStore: fileStore
+    )
     @ObservationIgnored private lazy var backgroundSession: URLSession = makeBackgroundSession()
     @ObservationIgnored private var backgroundEventsObserver: NSObjectProtocol?
     @ObservationIgnored private var externalDirectoryAccess: HanimeDownloadDirectoryAccess?
     @ObservationIgnored private var externalDirectoryAccessFailure: HanaDownloadDirectoryError?
     private var activeTasks: [String: URLSessionDownloadTask] = [:]
+    private var pendingRequestIDs: [String] = []
+    private var pendingRequests: [String: HanimeDownloadRequest] = [:]
+    private var activeRequestIDsInStartOrder: [String] = []
     private var progressByID: [String: Double] = [:]
-    private var continuationsByTaskID: [Int: CheckedContinuation<HanimeDownloadedFile, Error>] = [:]
+    private var continuationsByRequestID: [String: CheckedContinuation<HanimeDownloadedFile, Error>] = [:]
     private var requestIDsByTaskID: [Int: String] = [:]
-    private var completedTaskIDs = Set<Int>()
+    private var taskIntentsByTaskID: [Int: HanimeDownloadTaskIntent] = [:]
+    private var taskCreationModesByTaskID: [Int: HanimeDownloadTaskCreationMode] = [:]
+    private var finalizedTaskIDs = Set<Int>()
+    @ObservationIgnored private var backgroundTaskRestoration: Task<Void, Never>?
+    @ObservationIgnored private var didRestoreBackgroundTasks = false
     private static var backgroundCompletionHandlers: [String: () -> Void] = [:]
 
     init(
         httpClient: HanaHTTPClient,
-        session: URLSession = .shared,
-        fileManager: FileManager = .default
+        fileManager: FileManager = .default,
+        defaults: UserDefaults = .standard,
+        downloadsRootURL: URL? = nil,
+        sessionConfiguration: URLSessionConfiguration? = nil,
+        backgroundTasksProvider: (@Sendable () async -> [URLSessionTask])? = nil
     ) {
         self.httpClient = httpClient
-        self.session = session
-        self.fileManager = fileManager
-        self.fileStore = HanimeDownloadFileStore(fileManager: fileManager)
-        self.stateStore = HanimeDownloadTaskStateStore(fileManager: fileManager)
+        self.defaults = defaults
+        self.sessionConfigurationOverride = sessionConfiguration
+        self.backgroundTasksProviderOverride = backgroundTasksProvider
+
+        let defaultDownloadsRootURL: ((Bool) throws -> URL)? = downloadsRootURL.map { rootURL in
+            { create in
+                if create {
+                    try fileManager.createDirectory(at: rootURL, withIntermediateDirectories: true)
+                }
+                return rootURL
+            }
+        }
+        let fileStore = HanimeDownloadFileStore(
+            fileManager: fileManager,
+            externalDirectoryResolver: {
+                try HanaDownloadDirectoryPreference.resolvedExternalDirectory(defaults: defaults)
+            },
+            defaultDownloadsRootURL: defaultDownloadsRootURL
+        )
+        self.fileStore = fileStore
+        self.stateStore = HanimeDownloadTaskStateStore(
+            fileManager: fileManager,
+            stateDirectoryURL: downloadsRootURL
+        )
         do {
             self.externalDirectoryAccess = try fileStore.beginExternalDirectoryAccess()
         } catch {
@@ -814,30 +1106,26 @@ final class HanimeDownloadClient {
         _ request: HanimeDownloadRequest,
         onTaskCreated: ((HanimePersistedDownloadTask) -> Void)? = nil
     ) async throws -> HanimeDownloadedFile {
-        var urlRequest = URLRequest(url: request.mediaURL)
-        urlRequest.httpMethod = "GET"
-        urlRequest.timeoutInterval = 60
-        httpClient.mediaHeaders(for: request.mediaURL).forEach { key, value in
-            urlRequest.setValue(value, forHTTPHeaderField: key)
+        await restoreBackgroundTasks()
+        try Task.checkCancellation()
+
+        guard activeTasks[request.id] == nil,
+              pendingRequests[request.id] == nil,
+              continuationsByRequestID[request.id] == nil else {
+            throw HanimeDownloadError.alreadyScheduled
         }
 
-        let task = backgroundSession.downloadTask(with: urlRequest)
-        task.taskDescription = try Self.taskDescription(for: request)
-        activeTasks[request.id] = task
-        progressByID[request.id] = 0
-        requestIDsByTaskID[task.taskIdentifier] = request.id
-        if let snapshot = try? stateStore.markRunning(
+        let snapshot = try stateStore.markQueued(
             request: request,
-            taskIdentifier: task.taskIdentifier,
             sessionIdentifier: Self.backgroundSessionIdentifier
-        ) {
-            onTaskCreated?(snapshot)
-        }
+        )
+        onTaskCreated?(snapshot)
 
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
-                continuationsByTaskID[task.taskIdentifier] = continuation
-                task.resume()
+                continuationsByRequestID[request.id] = continuation
+                enqueue(request)
+                schedulePendingDownloads()
             }
         } onCancel: {
             Task { @MainActor in
@@ -851,26 +1139,81 @@ final class HanimeDownloadClient {
     }
 
     func isDownloading(id: String) -> Bool {
-        activeTasks[id] != nil
+        activeTasks[id] != nil || pendingRequests[id] != nil
     }
 
     var hasActiveDownloads: Bool {
-        !activeTasks.isEmpty
+        !activeTasks.isEmpty || !pendingRequests.isEmpty
+    }
+
+    var activeDownloadCount: Int {
+        activeTasks.count
+    }
+
+    var pendingDownloadIDs: [String] {
+        pendingRequestIDs
+    }
+
+    func pause(id: String) {
+        if let task = activeTasks[id] {
+            let taskIdentifier = task.taskIdentifier
+            if taskIntentsByTaskID[taskIdentifier] == .requeue {
+                removePendingRequest(id: id)
+                taskIntentsByTaskID[taskIdentifier] = .pause
+                return
+            }
+            taskIntentsByTaskID[taskIdentifier] = .pause
+            task.cancel(byProducingResumeData: { [self] resumeData in
+                Task { @MainActor [self] in
+                    self.finishPausedTask(
+                        taskIdentifier: taskIdentifier,
+                        requestID: id,
+                        resumeData: resumeData
+                    )
+                }
+            })
+            return
+        }
+
+        if pendingRequests[id] != nil {
+            removePendingRequest(id: id)
+            _ = try? stateStore.markPaused(
+                requestID: id,
+                resumeData: persistedTask(id: id)?.resumeData
+            )
+            resumeContinuation(requestID: id, throwing: HanimeDownloadError.paused)
+            schedulePendingDownloads()
+        }
     }
 
     func cancel(id: String) {
-        activeTasks[id]?.cancel()
-        activeTasks[id] = nil
-        progressByID[id] = nil
-        if let task = try? stateStore.task(id: id),
-           let taskIdentifier = task.taskIdentifier {
-            _ = try? stateStore.markFinished(
-                requestID: id,
-                taskIdentifier: taskIdentifier,
-                status: .cancelled,
-                errorDescription: nil
-            )
+        if let task = activeTasks[id] {
+            removePendingRequest(id: id)
+            taskIntentsByTaskID[task.taskIdentifier] = .cancel
+            task.cancel()
+            finishCancelledTask(taskIdentifier: task.taskIdentifier, requestID: id)
+            return
         }
+
+        if pendingRequests[id] != nil {
+            removePendingRequest(id: id)
+            _ = try? stateStore.markCancelled(requestID: id)
+            resumeContinuation(requestID: id, throwing: CancellationError())
+            schedulePendingDownloads()
+            return
+        }
+
+        _ = try? stateStore.markCancelled(requestID: id)
+    }
+
+    func remove(id: String) {
+        cancel(id: id)
+        try? stateStore.removeTask(requestID: id)
+    }
+
+    func downloadConcurrencyDidChange() {
+        enforceConcurrencyLimit()
+        schedulePendingDownloads()
     }
 
     func deleteLocalDownload(fileURL: URL) throws {
@@ -934,15 +1277,57 @@ final class HanimeDownloadClient {
     }
 
     func restoreBackgroundTasks() async {
+        if didRestoreBackgroundTasks {
+            return
+        }
+        if let backgroundTaskRestoration {
+            await backgroundTaskRestoration.value
+            return
+        }
+
+        let restoration = Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.performBackgroundTaskRestoration()
+        }
+        backgroundTaskRestoration = restoration
+        await restoration.value
+        didRestoreBackgroundTasks = true
+        backgroundTaskRestoration = nil
+    }
+
+    private func performBackgroundTaskRestoration() async {
         activateBackgroundSession()
         let tasks = await allBackgroundSessionTasks()
-        for task in tasks {
+        let restoredTasks = tasks.compactMap { task -> (URLSessionDownloadTask, HanimeDownloadRequest)? in
             guard let downloadTask = task as? URLSessionDownloadTask,
                   let request = Self.request(from: task) else {
-                continue
+                return nil
             }
+            return (downloadTask, request)
+        }
+        let tasksByRequestID = Dictionary(grouping: restoredTasks) { $0.1.id }
+
+        for (requestID, entries) in tasksByRequestID {
+            let sortedEntries = entries.sorted { lhs, rhs in
+                if lhs.0.countOfBytesReceived != rhs.0.countOfBytesReceived {
+                    return lhs.0.countOfBytesReceived > rhs.0.countOfBytesReceived
+                }
+                return lhs.0.taskIdentifier < rhs.0.taskIdentifier
+            }
+            guard let (downloadTask, request) = sortedEntries.first else { continue }
+
+            for (duplicateTask, _) in sortedEntries.dropFirst() {
+                finalizedTaskIDs.insert(duplicateTask.taskIdentifier)
+                duplicateTask.cancel()
+            }
+
             activeTasks[request.id] = downloadTask
             requestIDsByTaskID[downloadTask.taskIdentifier] = request.id
+            let wasCreatedFromResumeData = persistedTask(id: request.id)?.createdFromResumeData == true
+            let creationMode: HanimeDownloadTaskCreationMode = wasCreatedFromResumeData
+                ? .resumed
+                : .fresh
+            taskCreationModesByTaskID[downloadTask.taskIdentifier] = creationMode
 
             let expected = downloadTask.countOfBytesExpectedToReceive > 0
                 ? downloadTask.countOfBytesExpectedToReceive
@@ -952,11 +1337,58 @@ final class HanimeDownloadClient {
                 taskIdentifier: downloadTask.taskIdentifier,
                 sessionIdentifier: Self.backgroundSessionIdentifier,
                 downloadedByteCount: downloadTask.countOfBytesReceived,
-                expectedByteCount: expected
+                expectedByteCount: expected,
+                createdFromResumeData: creationMode == .resumed
             ) {
                 progressByID[request.id] = snapshot.progress
             }
+
+            removePendingRequest(id: requestID)
         }
+
+        activeRequestIDsInStartOrder = activeTasks.values
+            .sorted { $0.taskIdentifier < $1.taskIdentifier }
+            .compactMap { requestIDsByTaskID[$0.taskIdentifier] }
+
+        let activeRequestIDs = Set(tasksByRequestID.keys)
+        let snapshots = persistedTasks()
+        let queuedSnapshots = snapshots
+            .filter {
+                $0.status == .queued || ($0.status == .running && $0.queuePosition != nil)
+            }
+            .sorted(by: Self.isOrderedBeforeInQueue)
+
+        for snapshot in queuedSnapshots {
+            guard !activeRequestIDs.contains(snapshot.id),
+                  pendingRequests[snapshot.id] == nil else {
+                continue
+            }
+            if snapshot.status == .running {
+                _ = try? stateStore.markQueued(
+                    request: snapshot.request,
+                    sessionIdentifier: Self.backgroundSessionIdentifier,
+                    errorDescription: "重新排队时应用已退出，将重新开始下载。",
+                    preserveQueuePosition: true
+                )
+            }
+            enqueue(snapshot.request)
+        }
+
+        for snapshot in snapshots where snapshot.status == .running && snapshot.queuePosition == nil {
+            guard !activeRequestIDs.contains(snapshot.id),
+                  activeTasks[snapshot.id] == nil else {
+                continue
+            }
+            _ = try? stateStore.markFailed(
+                requestID: snapshot.id,
+                failureKind: .transient,
+                errorDescription: "后台任务已结束，可重新开始下载。",
+                resumeData: snapshot.resumeData
+            )
+        }
+
+        enforceConcurrencyLimit()
+        schedulePendingDownloads()
     }
 
     static func handleBackgroundEvents(
@@ -972,6 +1404,13 @@ final class HanimeDownloadClient {
     }
 
     private func makeBackgroundSession() -> URLSession {
+        if let sessionConfigurationOverride {
+            return URLSession(
+                configuration: sessionConfigurationOverride,
+                delegate: backgroundDelegate,
+                delegateQueue: nil
+            )
+        }
         let configuration = URLSessionConfiguration.background(withIdentifier: Self.backgroundSessionIdentifier)
         configuration.sessionSendsLaunchEvents = true
         configuration.isDiscretionary = false
@@ -997,7 +1436,10 @@ final class HanimeDownloadClient {
     }
 
     private func allBackgroundSessionTasks() async -> [URLSessionTask] {
-        await withCheckedContinuation { continuation in
+        if let backgroundTasksProviderOverride {
+            return await backgroundTasksProviderOverride()
+        }
+        return await withCheckedContinuation { continuation in
             backgroundSession.getAllTasks { tasks in
                 continuation.resume(returning: tasks)
             }
@@ -1011,6 +1453,10 @@ final class HanimeDownloadClient {
         downloadedByteCount: Int64,
         expectedByteCount: Int64
     ) {
+        guard activeTasks[requestID]?.taskIdentifier == taskIdentifier,
+              !finalizedTaskIDs.contains(taskIdentifier) else {
+            return
+        }
         progressByID[requestID] = min(max(fraction, 0), 1)
         _ = try? stateStore.updateProgress(
             requestID: requestID,
@@ -1020,15 +1466,37 @@ final class HanimeDownloadClient {
         )
     }
 
+    fileprivate func updateResumedProgress(
+        requestID: String,
+        taskIdentifier: Int,
+        fileOffset: Int64,
+        expectedByteCount: Int64
+    ) {
+        guard activeTasks[requestID]?.taskIdentifier == taskIdentifier,
+              !finalizedTaskIDs.contains(taskIdentifier) else {
+            return
+        }
+        let fraction = expectedByteCount > 0
+            ? Double(fileOffset) / Double(expectedByteCount)
+            : 0
+        progressByID[requestID] = min(max(fraction, 0), 1)
+        _ = try? stateStore.updateResumedProgress(
+            requestID: requestID,
+            taskIdentifier: taskIdentifier,
+            fileOffset: fileOffset,
+            expectedByteCount: expectedByteCount
+        )
+    }
+
     fileprivate func completeTask(
         taskIdentifier: Int,
         request: HanimeDownloadRequest,
         file: HanimeDownloadedFile
     ) {
-        completedTaskIDs.insert(taskIdentifier)
-        activeTasks[request.id] = nil
+        guard finalizeTask(taskIdentifier: taskIdentifier, requestID: request.id) else {
+            return
+        }
         progressByID[request.id] = 1
-        requestIDsByTaskID[taskIdentifier] = nil
         _ = try? stateStore.markCompleted(
             request: request,
             taskIdentifier: taskIdentifier,
@@ -1040,7 +1508,8 @@ final class HanimeDownloadClient {
                 try? self.stateStore.markNotificationSent(requestID: request.id, sentAt: sentAt)
             }
         }
-        continuationsByTaskID.removeValue(forKey: taskIdentifier)?.resume(returning: file)
+        continuationsByRequestID.removeValue(forKey: request.id)?.resume(returning: file)
+        schedulePendingDownloads()
     }
 
     fileprivate func completeTask(
@@ -1048,33 +1517,355 @@ final class HanimeDownloadClient {
         requestID: String?,
         error: Error?
     ) {
-        if completedTaskIDs.remove(taskIdentifier) != nil {
-            requestIDsByTaskID[taskIdentifier] = nil
-            continuationsByTaskID[taskIdentifier] = nil
+        if finalizedTaskIDs.contains(taskIdentifier) {
             return
         }
 
-        let resolvedRequestID = requestID ?? requestIDsByTaskID[taskIdentifier]
-        if let resolvedRequestID {
-            activeTasks[resolvedRequestID] = nil
-            progressByID[resolvedRequestID] = nil
-            if let error {
-                let status: HanimeDownloadTaskStatus = (error as? URLError)?.code == .cancelled ? .cancelled : .failed
-                _ = try? stateStore.markFinished(
-                    requestID: resolvedRequestID,
+        guard let resolvedRequestID = requestID ?? requestIDsByTaskID[taskIdentifier] else {
+            finalizedTaskIDs.insert(taskIdentifier)
+            return
+        }
+
+        switch taskIntentsByTaskID[taskIdentifier] {
+        case .pause:
+            if let resumeData = error.flatMap(Self.resumeData(from:)) {
+                finishPausedTask(
                     taskIdentifier: taskIdentifier,
-                    status: status,
-                    errorDescription: status == .cancelled ? nil : error.localizedDescription
+                    requestID: resolvedRequestID,
+                    resumeData: resumeData
                 )
             }
+            return
+        case .cancel:
+            finishCancelledTask(taskIdentifier: taskIdentifier, requestID: resolvedRequestID)
+            return
+        case .requeue:
+            if let resumeData = error.flatMap(Self.resumeData(from:)) {
+                finishRequeuedTask(
+                    taskIdentifier: taskIdentifier,
+                    requestID: resolvedRequestID,
+                    resumeData: resumeData
+                )
+            }
+            return
+        case nil:
+            break
         }
-        requestIDsByTaskID[taskIdentifier] = nil
 
-        if let error {
-            continuationsByTaskID.removeValue(forKey: taskIdentifier)?.resume(throwing: error)
-        } else {
-            continuationsByTaskID[taskIdentifier] = nil
+        let resolvedError = error ?? HanaNetworkError.invalidResponse
+        if taskCreationModesByTaskID[taskIdentifier] == .resumed,
+           Self.isUnusableResumeData(resolvedError),
+           let request = persistedTask(id: resolvedRequestID)?.request {
+            guard finalizeTask(taskIdentifier: taskIdentifier, requestID: resolvedRequestID) else {
+                return
+            }
+            progressByID[resolvedRequestID] = 0
+            _ = try? stateStore.markQueued(
+                request: request,
+                sessionIdentifier: Self.backgroundSessionIdentifier,
+                clearResumeData: true,
+                errorDescription: "无法继续旧进度，已从头开始下载。",
+                atFront: true
+            )
+            enqueue(request, atFront: true)
+            schedulePendingDownloads()
+            return
         }
+
+        guard finalizeTask(taskIdentifier: taskIdentifier, requestID: resolvedRequestID) else {
+            return
+        }
+        let resumeData = Self.resumeData(from: resolvedError)
+        let failureKind = Self.failureKind(for: resolvedError)
+        _ = try? stateStore.markFailed(
+            requestID: resolvedRequestID,
+            failureKind: failureKind,
+            errorDescription: resolvedError.localizedDescription,
+            resumeData: resumeData
+        )
+        if resumeData == nil {
+            progressByID[resolvedRequestID] = nil
+        }
+        resumeContinuation(requestID: resolvedRequestID, throwing: resolvedError)
+        schedulePendingDownloads()
+    }
+
+    private var maximumConcurrentDownloadCount: Int {
+        let configuredValue = defaults.object(forKey: HanaSettingsKey.downloadConcurrency) == nil
+            ? 2
+            : defaults.integer(forKey: HanaSettingsKey.downloadConcurrency)
+        return min(max(configuredValue, 1), 5)
+    }
+
+    private func enforceConcurrencyLimit() {
+        let maximumCount = maximumConcurrentDownloadCount
+        guard activeTasks.count > maximumCount else { return }
+
+        let knownActiveIDs = Set(activeTasks.keys)
+        let orderedActiveIDs = activeRequestIDsInStartOrder.filter { knownActiveIDs.contains($0) }
+            + activeTasks.keys
+                .filter { !activeRequestIDsInStartOrder.contains($0) }
+                .sorted()
+
+        for requestID in orderedActiveIDs.dropFirst(maximumCount) {
+            guard let task = activeTasks[requestID],
+                  taskIntentsByTaskID[task.taskIdentifier] == nil,
+                  let request = Self.request(from: task) ?? persistedTask(id: requestID)?.request else {
+                continue
+            }
+
+            if pendingRequests[requestID] == nil {
+                pendingRequests[requestID] = request
+                pendingRequestIDs.append(requestID)
+            }
+            _ = try? stateStore.markRequeuePending(requestID: requestID)
+            let taskIdentifier = task.taskIdentifier
+            taskIntentsByTaskID[taskIdentifier] = .requeue
+            task.cancel(byProducingResumeData: { [self] resumeData in
+                Task { @MainActor [self] in
+                    self.finishRequeuedTask(
+                        taskIdentifier: taskIdentifier,
+                        requestID: requestID,
+                        resumeData: resumeData
+                    )
+                }
+            })
+        }
+    }
+
+    private func enqueue(_ request: HanimeDownloadRequest, atFront: Bool = false) {
+        guard activeTasks[request.id] == nil,
+              pendingRequests[request.id] == nil else {
+            return
+        }
+        pendingRequests[request.id] = request
+        if atFront {
+            pendingRequestIDs.insert(request.id, at: 0)
+        } else {
+            pendingRequestIDs.append(request.id)
+        }
+    }
+
+    private func removePendingRequest(id: String) {
+        pendingRequests[id] = nil
+        pendingRequestIDs.removeAll { $0 == id }
+    }
+
+    private func schedulePendingDownloads() {
+        while activeTasks.count < maximumConcurrentDownloadCount,
+              let requestID = pendingRequestIDs.first {
+            if activeTasks[requestID] != nil {
+                break
+            }
+            pendingRequestIDs.removeFirst()
+            guard let request = pendingRequests.removeValue(forKey: requestID) else {
+                continue
+            }
+
+            do {
+                try startDownloadTask(for: request)
+            } catch {
+                _ = try? stateStore.markFailed(
+                    requestID: request.id,
+                    failureKind: .permanent,
+                    errorDescription: error.localizedDescription,
+                    resumeData: nil
+                )
+                progressByID[request.id] = nil
+                resumeContinuation(requestID: request.id, throwing: error)
+            }
+        }
+    }
+
+    private func startDownloadTask(for request: HanimeDownloadRequest) throws {
+        let taskDescription = try Self.taskDescription(for: request)
+        let snapshot = try stateStore.task(id: request.id)
+        let resumeData = snapshot?.resumeData
+        let task: URLSessionDownloadTask
+        let creationMode: HanimeDownloadTaskCreationMode
+
+        if let resumeData {
+            task = backgroundSession.downloadTask(withResumeData: resumeData)
+            creationMode = .resumed
+        } else {
+            var urlRequest = URLRequest(url: request.mediaURL)
+            urlRequest.httpMethod = "GET"
+            urlRequest.timeoutInterval = 60
+            httpClient.mediaHeaders(for: request.mediaURL).forEach { key, value in
+                urlRequest.setValue(value, forHTTPHeaderField: key)
+            }
+            task = backgroundSession.downloadTask(with: urlRequest)
+            creationMode = .fresh
+        }
+
+        task.taskDescription = taskDescription
+        let runningSnapshot: HanimePersistedDownloadTask
+        do {
+            runningSnapshot = try stateStore.markRunning(
+                request: request,
+                taskIdentifier: task.taskIdentifier,
+                sessionIdentifier: Self.backgroundSessionIdentifier,
+                createdFromResumeData: creationMode == .resumed
+            )
+        } catch {
+            finalizedTaskIDs.insert(task.taskIdentifier)
+            task.cancel()
+            throw error
+        }
+        activeTasks[request.id] = task
+        activeRequestIDsInStartOrder.removeAll { $0 == request.id }
+        activeRequestIDsInStartOrder.append(request.id)
+        progressByID[request.id] = runningSnapshot.progress
+        requestIDsByTaskID[task.taskIdentifier] = request.id
+        taskCreationModesByTaskID[task.taskIdentifier] = creationMode
+        task.resume()
+    }
+
+    @discardableResult
+    private func finalizeTask(taskIdentifier: Int, requestID: String) -> Bool {
+        guard finalizedTaskIDs.insert(taskIdentifier).inserted else {
+            return false
+        }
+        if activeTasks[requestID]?.taskIdentifier == taskIdentifier {
+            activeTasks[requestID] = nil
+        }
+        activeRequestIDsInStartOrder.removeAll { $0 == requestID }
+        requestIDsByTaskID[taskIdentifier] = nil
+        taskIntentsByTaskID[taskIdentifier] = nil
+        taskCreationModesByTaskID[taskIdentifier] = nil
+        return true
+    }
+
+    private func finishPausedTask(
+        taskIdentifier: Int,
+        requestID: String,
+        resumeData: Data?
+    ) {
+        guard finalizeTask(taskIdentifier: taskIdentifier, requestID: requestID) else {
+            return
+        }
+        let snapshot = try? stateStore.markPaused(requestID: requestID, resumeData: resumeData)
+        progressByID[requestID] = snapshot?.progress
+        resumeContinuation(requestID: requestID, throwing: HanimeDownloadError.paused)
+        schedulePendingDownloads()
+    }
+
+    private func finishCancelledTask(taskIdentifier: Int, requestID: String) {
+        guard finalizeTask(taskIdentifier: taskIdentifier, requestID: requestID) else {
+            return
+        }
+        _ = try? stateStore.markCancelled(requestID: requestID)
+        progressByID[requestID] = nil
+        resumeContinuation(requestID: requestID, throwing: CancellationError())
+        schedulePendingDownloads()
+    }
+
+    private func finishRequeuedTask(
+        taskIdentifier: Int,
+        requestID: String,
+        resumeData: Data?
+    ) {
+        if taskIntentsByTaskID[taskIdentifier] == .pause {
+            finishPausedTask(
+                taskIdentifier: taskIdentifier,
+                requestID: requestID,
+                resumeData: resumeData
+            )
+            return
+        }
+        if taskIntentsByTaskID[taskIdentifier] == .cancel {
+            finishCancelledTask(taskIdentifier: taskIdentifier, requestID: requestID)
+            return
+        }
+
+        let request = pendingRequests[requestID] ?? persistedTask(id: requestID)?.request
+        guard finalizeTask(taskIdentifier: taskIdentifier, requestID: requestID) else {
+            return
+        }
+        guard let request else {
+            removePendingRequest(id: requestID)
+            resumeContinuation(requestID: requestID, throwing: HanaNetworkError.invalidResponse)
+            schedulePendingDownloads()
+            return
+        }
+        _ = try? stateStore.markPaused(
+            requestID: requestID,
+            resumeData: resumeData,
+            preserveQueuePosition: true
+        )
+        let snapshot = try? stateStore.markQueued(
+            request: request,
+            sessionIdentifier: Self.backgroundSessionIdentifier,
+            preserveQueuePosition: true
+        )
+        progressByID[requestID] = snapshot?.progress
+        schedulePendingDownloads()
+    }
+
+    private func resumeContinuation(requestID: String, throwing error: Error) {
+        continuationsByRequestID.removeValue(forKey: requestID)?.resume(throwing: error)
+    }
+
+    private static func isOrderedBeforeInQueue(
+        _ lhs: HanimePersistedDownloadTask,
+        _ rhs: HanimePersistedDownloadTask
+    ) -> Bool {
+        switch (lhs.queuePosition, rhs.queuePosition) {
+        case let (left?, right?) where left != right:
+            return left < right
+        case (nil, _?):
+            return true
+        case (_?, nil):
+            return false
+        default:
+            if lhs.createdAt != rhs.createdAt {
+                return lhs.createdAt < rhs.createdAt
+            }
+            return lhs.id < rhs.id
+        }
+    }
+
+    nonisolated private static func resumeData(from error: Error) -> Data? {
+        (error as NSError).userInfo[NSURLSessionDownloadTaskResumeData] as? Data
+    }
+
+    nonisolated private static func isUnusableResumeData(_ error: Error) -> Bool {
+        let nsError = error as NSError
+        guard nsError.domain == NSURLErrorDomain,
+              resumeData(from: error) == nil else {
+            return false
+        }
+        let unusableResumeCodes: Set<URLError.Code> = [
+            .badURL,
+            .unsupportedURL,
+            .resourceUnavailable,
+            .cannotDecodeRawData,
+            .cannotDecodeContentData
+        ]
+        return unusableResumeCodes.contains(URLError.Code(rawValue: nsError.code))
+    }
+
+    nonisolated private static func failureKind(for error: Error) -> HanimeDownloadFailureKind {
+        let nsError = error as NSError
+        guard nsError.domain == NSURLErrorDomain else {
+            return .permanent
+        }
+
+        let transientCodes: Set<URLError.Code> = [
+            .timedOut,
+            .cannotFindHost,
+            .cannotConnectToHost,
+            .dnsLookupFailed,
+            .networkConnectionLost,
+            .notConnectedToInternet,
+            .internationalRoamingOff,
+            .callIsActive,
+            .dataNotAllowed,
+            .backgroundSessionWasDisconnected
+        ]
+        return transientCodes.contains(URLError.Code(rawValue: nsError.code))
+            ? .transient
+            : .permanent
     }
 
     fileprivate static func finishBackgroundEvents(identifier: String) {
