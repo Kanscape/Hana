@@ -90,6 +90,7 @@ struct VideoIntroductionPreview: View {
 
 struct VideoArtistSection: View {
     @Environment(HanaServices.self) private var services
+    @Environment(\.colorScheme) private var colorScheme
     let video: HanimeVideo
     @State private var artist: HanimeArtist?
     @State private var isWorking = false
@@ -139,7 +140,7 @@ struct VideoArtistSection: View {
             artist = video.artist
             alertMessage = nil
         }
-        .confirmationDialog("取消订阅", isPresented: $isUnsubscribeConfirmationPresented) {
+        .alert("取消订阅", isPresented: $isUnsubscribeConfirmationPresented) {
             Button("取消订阅", role: .destructive) {
                 setSubscribed(false)
             }
@@ -168,12 +169,16 @@ struct VideoArtistSection: View {
         .buttonStyle(.borderedProminent)
         .buttonBorderShape(.capsule)
         .controlSize(.large)
-        .tint(artist.isSubscribed ? Color.secondary.opacity(0.25) : .white)
-        .foregroundStyle(artist.isSubscribed ? Color.primary : Color.black)
+        .tint(artist.isSubscribed ? Color.secondary.opacity(0.25) : Color.primary)
+        .foregroundStyle(artist.isSubscribed ? Color.primary : unsubscribedButtonForeground)
         .animation(.snappy(duration: 0.22), value: artist.isSubscribed)
         .sensoryFeedback(.selection, trigger: artist.isSubscribed)
         .accessibilityLabel(artist.isSubscribed ? "已订阅，点按可取消订阅" : "订阅")
         .disabled(isWorking)
+    }
+
+    private var unsubscribedButtonForeground: Color {
+        colorScheme == .dark ? .black : .white
     }
 
     private func handleSubscribeTap() {
