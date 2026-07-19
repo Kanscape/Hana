@@ -11,6 +11,11 @@
 		F44DB4932FB760000C55FF9 /* Nuke in Frameworks */ = {isa = PBXBuildFile; productRef = F44DB4952FB760000C55FF9 /* Nuke */; };
 		F44DB4942FB760000C55FF9 /* NukeUI in Frameworks */ = {isa = PBXBuildFile; productRef = F44DB4962FB760000C55FF9 /* NukeUI */; };
 		F44DB4A92FB762000C55FF9 /* AppBuildInfoTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F44DB4A12FB762000C55FF9 /* AppBuildInfoTests.swift */; };
+		F4A100072FB8000000000007 /* HanimeHomeParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4A100012FB8000000000001 /* HanimeHomeParserTests.swift */; };
+		F4A100082FB8000000000008 /* HanimeHomeRepositoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4A100022FB8000000000002 /* HanimeHomeRepositoryTests.swift */; };
+		F4A100092FB8000000000009 /* home-recommendations-reference.html in Resources */ = {isa = PBXBuildFile; fileRef = F4A100042FB8000000000004 /* home-recommendations-reference.html */; };
+		F4A1000A2FB800000000000A /* home-recommendations-compact.html in Resources */ = {isa = PBXBuildFile; fileRef = F4A100052FB8000000000005 /* home-recommendations-compact.html */; };
+		F4A1000B2FB800000000000B /* home-recommendations-unknown.html in Resources */ = {isa = PBXBuildFile; fileRef = F4A100062FB8000000000006 /* home-recommendations-unknown.html */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -28,6 +33,11 @@
 		F44DB4982FB761000C55FF9 /* Version.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Version.xcconfig; sourceTree = "<group>"; };
 		F44DB4A02FB762000C55FF9 /* HanaTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = HanaTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		F44DB4A12FB762000C55FF9 /* AppBuildInfoTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppBuildInfoTests.swift; sourceTree = "<group>"; };
+		F4A100012FB8000000000001 /* HanimeHomeParserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HanimeHomeParserTests.swift; sourceTree = "<group>"; };
+		F4A100022FB8000000000002 /* HanimeHomeRepositoryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HanimeHomeRepositoryTests.swift; sourceTree = "<group>"; };
+		F4A100042FB8000000000004 /* home-recommendations-reference.html */ = {isa = PBXFileReference; lastKnownFileType = text.html; path = "home-recommendations-reference.html"; sourceTree = "<group>"; };
+		F4A100052FB8000000000005 /* home-recommendations-compact.html */ = {isa = PBXFileReference; lastKnownFileType = text.html; path = "home-recommendations-compact.html"; sourceTree = "<group>"; };
+		F4A100062FB8000000000006 /* home-recommendations-unknown.html */ = {isa = PBXFileReference; lastKnownFileType = text.html; path = "home-recommendations-unknown.html"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -81,8 +91,21 @@
 			isa = PBXGroup;
 			children = (
 				F44DB4A12FB762000C55FF9 /* AppBuildInfoTests.swift */,
+				F4A100012FB8000000000001 /* HanimeHomeParserTests.swift */,
+				F4A100022FB8000000000002 /* HanimeHomeRepositoryTests.swift */,
+				F4A100032FB8000000000003 /* Fixtures */,
 			);
 			path = HanaTests;
+			sourceTree = "<group>";
+		};
+		F4A100032FB8000000000003 /* Fixtures */ = {
+			isa = PBXGroup;
+			children = (
+				F4A100042FB8000000000004 /* home-recommendations-reference.html */,
+				F4A100052FB8000000000005 /* home-recommendations-compact.html */,
+				F4A100062FB8000000000006 /* home-recommendations-unknown.html */,
+			);
+			path = Fixtures;
 			sourceTree = "<group>";
 		};
 		F44DB4992FB761000C55FF9 /* Config */ = {
@@ -199,6 +222,9 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				F4A1000A2FB800000000000A /* home-recommendations-compact.html in Resources */,
+				F4A100092FB8000000000009 /* home-recommendations-reference.html in Resources */,
+				F4A1000B2FB800000000000B /* home-recommendations-unknown.html in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -217,6 +243,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				F44DB4A92FB762000C55FF9 /* AppBuildInfoTests.swift in Sources */,
+				F4A100072FB8000000000007 /* HanimeHomeParserTests.swift in Sources */,
+				F4A100082FB8000000000008 /* HanimeHomeRepositoryTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
