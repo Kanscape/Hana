@@ -289,7 +289,17 @@ struct HanimeHTMLParser {
     }
 
     private func parseNormalCards(in root: Element) throws -> [HanimeInfo] {
-        try root.select("div[class^=horizontal-card]").array().compactMap(parseNormalCard)
+        var seenVideoCodes = Set<String>()
+        var videos = [HanimeInfo]()
+        let cards = try root.select("div[class^=horizontal-card], div.pure-grid-card").array()
+        for card in cards {
+            guard let info = try parseNormalCard(from: card),
+                  seenVideoCodes.insert(info.videoCode).inserted else {
+                continue
+            }
+            videos.append(info)
+        }
+        return videos
     }
 
     private func parseAccountCards(in root: Element, selector: String) throws -> [HanimeInfo] {
@@ -297,10 +307,12 @@ struct HanimeHTMLParser {
     }
 
     private func parseSimplifiedCards(in root: Element) throws -> [HanimeInfo] {
+        var seenVideoCodes = Set<String>()
         var videos = [HanimeInfo]()
         for link in try root.select("a[href]").array() {
             guard try link.select("div.home-rows-videos-div").first() != nil,
-                  let info = try parseSimplifiedCard(from: link) else {
+                  let info = try parseSimplifiedCard(from: link),
+                  seenVideoCodes.insert(info.videoCode).inserted else {
                 continue
             }
             videos.append(info)
@@ -309,7 +321,10 @@ struct HanimeHTMLParser {
     }
 
     private func parseNormalCard(from element: Element) throws -> HanimeInfo? {
-        let title = try element.select("div.title, h4.video-title").first()?.text().trimmedNonEmpty()
+        let title = try element.select("div.title, h4.video-title, div.grid-title")
+            .first()?
+            .text()
+            .trimmedNonEmpty()
             ?? (try element.select("img").first()?.attr("alt").trimmedNonEmpty())
             ?? (try element.attr("title").trimmedNonEmpty())
         let coverURL = try firstURL(from: element.select("img").first(), attribute: "src")
@@ -318,12 +333,20 @@ struct HanimeHTMLParser {
 
         guard let title, let code else { return nil }
 
-        let thumbContainer = try element.select("div[class^=thumb-container]")
-        let duration = try thumbContainer.select("div[class^=duration]").text().trimmedNonEmpty()
-        let stats = try thumbContainer.select("div[class^=stat-item]").array()
+        let thumbContainer = try element.select("div[class^=thumb-container], div.grid-thumb-container").first()
+        let duration = try thumbContainer?
+            .select("div[class^=duration], div.grid-duration")
+            .first()?
+            .text()
+            .trimmedNonEmpty()
+        let stats = try thumbContainer?
+            .select("div[class^=stat-item], div.grid-stat-item")
+            .array() ?? []
         let views = try stats.dropFirst().first?.text().trimmedNonEmpty()
 
-        let artistAndUploadTime = try element.select("div.subtitle a, div.video-meta-data a")
+        let artistAndUploadTime = try element.select(
+            "div.subtitle a, div.video-meta-data a, div.grid-subtitle a"
+        )
             .first()?
             .text()
             .trimmedNonEmpty()
