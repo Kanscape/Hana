@@ -284,9 +284,9 @@ struct VideoLibraryActionsView: View {
         }
         .sheet(isPresented: $isPlaylistSheetPresented) {
             VideoPlaylistPickerSheet(
-                playlists: $playlists,
+                playlists: playlists,
                 isWorking: isWorking,
-                onToggle: togglePlaylist,
+                onApply: applyPlaylistChanges,
                 onCreate: createPlaylist
             )
         }
@@ -415,20 +415,36 @@ struct VideoLibraryActionsView: View {
         isPlaylistSheetPresented = true
     }
 
-    private func togglePlaylist(_ playlist: HanimeVideoListState.Playlist) {
-        guard let index = playlists.firstIndex(where: { $0.code == playlist.code }) else { return }
+    private func applyPlaylistChanges(_ desiredPlaylists: [HanimeVideoListState.Playlist]) {
+        let changes = desiredPlaylists.compactMap { desiredPlaylist -> HanimeVideoListState.Playlist? in
+            guard let currentPlaylist = playlists.first(where: { $0.code == desiredPlaylist.code }),
+                  currentPlaylist.isSelected != desiredPlaylist.isSelected else {
+                return nil
+            }
+            return desiredPlaylist
+        }
+
+        guard !changes.isEmpty else {
+            isPlaylistSheetPresented = false
+            return
+        }
+
         isWorking = true
-        let previous = playlists
-        playlists[index].isSelected.toggle()
         Task {
             do {
-                try await services.repository.setVideoPlaylist(
-                    video: video,
-                    listCode: playlist.code,
-                    shouldAdd: playlists[index].isSelected
-                )
+                for playlist in changes {
+                    try await services.repository.setVideoPlaylist(
+                        video: video,
+                        listCode: playlist.code,
+                        shouldAdd: playlist.isSelected
+                    )
+
+                    if let index = playlists.firstIndex(where: { $0.code == playlist.code }) {
+                        playlists[index].isSelected = playlist.isSelected
+                    }
+                }
+                isPlaylistSheetPresented = false
             } catch {
-                playlists = previous
                 handleActionError(error)
             }
             isWorking = false
@@ -466,63 +482,294 @@ struct VideoLibraryActionsView: View {
 }
 
 struct VideoPlaylistPickerSheet: View {
-    @Environment(\.dismiss) private var dismiss
-    @Binding var playlists: [HanimeVideoListState.Playlist]
+    let playlists: [HanimeVideoListState.Playlist]
     let isWorking: Bool
-    let onToggle: (HanimeVideoListState.Playlist) -> Void
+    let onApply: ([HanimeVideoListState.Playlist]) -> Void
     let onCreate: (String, String) -> Void
-    @State private var playlistTitle = ""
-    @State private var playlistDescription = ""
+    @State private var draftPlaylists: [HanimeVideoListState.Playlist]
+#if os(macOS)
+    @State private var macOSPage = VideoPlaylistMacOSPage.playlists
+#endif
 
-    private var canCreate: Bool {
-        !playlistTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isWorking
+    init(
+        playlists: [HanimeVideoListState.Playlist],
+        isWorking: Bool,
+        onApply: @escaping ([HanimeVideoListState.Playlist]) -> Void,
+        onCreate: @escaping (String, String) -> Void
+    ) {
+        self.playlists = playlists
+        self.isWorking = isWorking
+        self.onApply = onApply
+        self.onCreate = onCreate
+        _draftPlaylists = State(initialValue: playlists)
     }
 
+    @ViewBuilder
     var body: some View {
+#if os(macOS)
+        macOSBody
+#else
+        mobileBody
+#endif
+    }
+
+    private var mobileBody: some View {
         NavigationStack {
             Form {
-                Section("已有清单") {
-                    if playlists.isEmpty {
-                        Text("暂无可选播放清单")
-                            .foregroundStyle(.secondary)
-                    } else {
-                        ForEach(playlists) { playlist in
-                            Button {
-                                onToggle(playlist)
-                            } label: {
-                                HStack {
-                                    Label(playlist.title, systemImage: playlist.isSelected ? "checkmark.circle.fill" : "circle")
-                                    Spacer()
-                                }
-                            }
-                            .disabled(isWorking)
-                        }
+                if playlists.isEmpty {
+                    Text("暂无可选播放清单")
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(draftPlaylists) { playlist in
+                        playlistRow(playlist)
                     }
-                }
-
-                Section("新建清单") {
-                    TextField("名称", text: $playlistTitle)
-                    TextField("简介", text: $playlistDescription, axis: .vertical)
-                        .lineLimit(3...6)
-                    Button("创建并加入当前视频") {
-                        onCreate(
-                            playlistTitle.trimmingCharacters(in: .whitespacesAndNewlines),
-                            playlistDescription.trimmingCharacters(in: .whitespacesAndNewlines)
-                        )
-                    }
-                    .disabled(!canCreate)
                 }
             }
             .navigationTitle("播放清单")
             .toolbar {
+                ToolbarItem(placement: .primaryAction) {
+                    NavigationLink {
+                        VideoPlaylistCreationPage(
+                            isWorking: isWorking,
+                            onCreate: onCreate
+                        )
+                    } label: {
+                        Image(systemName: "plus")
+                    }
+                    .accessibilityLabel("新建播放清单")
+                    .disabled(isWorking)
+                }
+
                 ToolbarItem(placement: .cancellationAction) {
                     HanaToolbarIconButton(title: "完成", systemImage: "checkmark") {
-                        dismiss()
+                        onApply(draftPlaylists)
                     }
                     .disabled(isWorking)
                 }
             }
         }
+    }
+
+#if os(macOS)
+    private var macOSBody: some View {
+        Group {
+            switch macOSPage {
+            case .playlists:
+                macOSPlaylistPage
+            case .creation:
+                VideoPlaylistCreationPage(
+                    isWorking: isWorking,
+                    onBack: { macOSPage = .playlists },
+                    onCreate: onCreate
+                )
+            }
+        }
+        .frame(width: 520, height: 360)
+    }
+
+    private var macOSPlaylistPage: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 12) {
+                Text("播放清单")
+                    .font(.headline)
+
+                Spacer()
+
+                Button {
+                    macOSPage = .creation
+                } label: {
+                    Image(systemName: "plus")
+                }
+                .buttonStyle(.borderless)
+                .accessibilityLabel("新建播放清单")
+                .disabled(isWorking)
+
+                HanaToolbarIconButton(title: "完成", systemImage: "checkmark") {
+                    onApply(draftPlaylists)
+                }
+                .disabled(isWorking)
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 14)
+
+            Divider()
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    if draftPlaylists.isEmpty {
+                        Text("暂无可选播放清单")
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.vertical, 20)
+                    } else {
+                        ForEach(draftPlaylists) { playlist in
+                            playlistRow(playlist)
+                                .buttonStyle(.plain)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 9)
+
+                            if playlist.id != draftPlaylists.last?.id {
+                                Divider()
+                            }
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(20)
+            }
+        }
+    }
+#endif
+
+    private func playlistRow(_ playlist: HanimeVideoListState.Playlist) -> some View {
+        Button {
+            guard let index = draftPlaylists.firstIndex(where: { $0.code == playlist.code }) else { return }
+            draftPlaylists[index].isSelected.toggle()
+        } label: {
+            HStack {
+                Label(
+                    playlist.title,
+                    systemImage: playlist.isSelected ? "checkmark.circle.fill" : "circle"
+                )
+                Spacer()
+            }
+        }
+        .disabled(isWorking)
+    }
+}
+
+#if os(macOS)
+private enum VideoPlaylistMacOSPage {
+    case playlists
+    case creation
+}
+#endif
+
+private struct VideoPlaylistCreationPage: View {
+    let isWorking: Bool
+    let onBack: (() -> Void)?
+    let onCreate: (String, String) -> Void
+    @State private var playlistTitle = ""
+    @State private var playlistDescription = ""
+
+    init(
+        isWorking: Bool,
+        onBack: (() -> Void)? = nil,
+        onCreate: @escaping (String, String) -> Void
+    ) {
+        self.isWorking = isWorking
+        self.onBack = onBack
+        self.onCreate = onCreate
+    }
+
+    private var canCreate: Bool {
+        !playlistTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isWorking
+    }
+
+    @ViewBuilder
+    var body: some View {
+#if os(macOS)
+        macOSBody
+#else
+        mobileBody
+#endif
+    }
+
+    private var mobileBody: some View {
+        Form {
+            Section {
+                TextField("名称", text: $playlistTitle)
+                TextField("简介", text: $playlistDescription, axis: .vertical)
+                    .lineLimit(3...6)
+            }
+        }
+        .navigationTitle("新建播放清单")
+        .toolbar {
+            ToolbarItem(placement: .confirmationAction) {
+                HanaToolbarIconButton(
+                    title: "创建并加入当前视频",
+                    systemImage: "checkmark"
+                ) {
+                    submit()
+                }
+                .disabled(!canCreate)
+            }
+        }
+    }
+
+#if os(macOS)
+    private var macOSBody: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 12) {
+                HanaToolbarIconButton(title: "返回", systemImage: "chevron.left") {
+                    onBack?()
+                }
+
+                Text("新建播放清单")
+                    .font(.headline)
+
+                Spacer()
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 14)
+
+            Divider()
+
+            Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 12, verticalSpacing: 14) {
+                GridRow {
+                    macOSFieldLabel("名称")
+                    TextField("输入名称", text: $playlistTitle)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(maxWidth: .infinity)
+                }
+
+                GridRow {
+                    macOSFieldLabel("简介")
+                    TextField("可选", text: $playlistDescription, axis: .vertical)
+                        .textFieldStyle(.roundedBorder)
+                        .lineLimit(4...7)
+                        .frame(minHeight: 96, maxHeight: 140)
+                        .frame(maxWidth: .infinity, alignment: .topLeading)
+                }
+            }
+            .padding(20)
+
+            Spacer(minLength: 0)
+
+            Divider()
+
+            HStack {
+                Spacer()
+
+                Button {
+                    submit()
+                } label: {
+                    Label("创建并加入", systemImage: "checkmark")
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .accessibilityLabel("创建并加入当前视频")
+                .keyboardShortcut(.defaultAction)
+                .disabled(!canCreate)
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 14)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func macOSFieldLabel(_ text: String) -> some View {
+        Text(text)
+            .foregroundStyle(.secondary)
+            .frame(width: 44, alignment: .trailing)
+    }
+#endif
+
+    private func submit() {
+        onCreate(
+            playlistTitle.trimmingCharacters(in: .whitespacesAndNewlines),
+            playlistDescription.trimmingCharacters(in: .whitespacesAndNewlines)
+        )
     }
 }
 
