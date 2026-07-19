@@ -528,6 +528,10 @@ struct VideoPlaylistPickerSheet: View {
 
 struct RelatedVideosSection: View {
     let videos: [HanimeInfo]
+    @State private var availableWidth: CGFloat = 0
+
+    private let minimumCardWidth: CGFloat = 150
+    private let columnSpacing: CGFloat = 12
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -540,11 +544,47 @@ struct RelatedVideosSection: View {
                     .font(.headline)
 
                 HanaVideoGridLinks(
-                    videos: videos,
-                    normalMinimumWidth: 150,
-                    portraitMinimumWidth: 150
+                    videos: visibleVideos,
+                    normalMinimumWidth: minimumCardWidth,
+                    portraitMinimumWidth: minimumCardWidth
                 )
             }
         }
+        .onGeometryChange(for: CGFloat.self) { geometry in
+            geometry.size.width
+        } action: { newWidth in
+            availableWidth = newWidth
+        }
+    }
+
+    private var visibleVideos: [HanimeInfo] {
+        let visibleCount = HanaCompleteGridRows.visibleItemCount(
+            totalCount: videos.count,
+            availableWidth: availableWidth,
+            minimumItemWidth: minimumCardWidth,
+            spacing: columnSpacing
+        )
+        return Array(videos.prefix(visibleCount))
+    }
+}
+
+struct HanaCompleteGridRows {
+    static func visibleItemCount(
+        totalCount: Int,
+        availableWidth: CGFloat,
+        minimumItemWidth: CGFloat,
+        spacing: CGFloat
+    ) -> Int {
+        guard totalCount > 0 else { return 0 }
+
+        let minimumItemWidth = max(minimumItemWidth, 1)
+        let spacing = max(spacing, 0)
+        let columnCount = max(
+            Int((max(availableWidth, 0) + spacing) / (minimumItemWidth + spacing)),
+            1
+        )
+        guard totalCount > columnCount else { return totalCount }
+
+        return totalCount - totalCount % columnCount
     }
 }
