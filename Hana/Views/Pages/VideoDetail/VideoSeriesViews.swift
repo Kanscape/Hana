@@ -1,4 +1,7 @@
 import SwiftUI
+#if os(iOS)
+import UIKit
+#endif
 
 struct VideoSeriesSection: View {
   let series: HanimeVideoSeries
@@ -19,8 +22,8 @@ struct VideoSeriesSection: View {
 
       ScrollViewReader { proxy in
         HanaHorizontalFadingScrollView(
-          contentLeadingPadding: 1,
-          contentTrailingPadding: 1
+          contentLeadingPadding: horizontalScrollOverflow + 1,
+          contentTrailingPadding: horizontalScrollOverflow + 1
         ) {
           LazyHStack(alignment: .top, spacing: 12) {
             ForEach(series.videos) { video in
@@ -32,6 +35,7 @@ struct VideoSeriesSection: View {
             }
           }
         }
+        .padding(.horizontal, -horizontalScrollOverflow)
         .task(id: series.currentVideoCode) {
           scrollToCurrent(using: proxy)
         }
@@ -44,6 +48,14 @@ struct VideoSeriesSection: View {
     withAnimation(.easeInOut(duration: 0.25)) {
       proxy.scrollTo(currentVideoCode, anchor: .center)
     }
+  }
+
+  private var horizontalScrollOverflow: CGFloat {
+#if os(iOS)
+    UIDevice.current.userInterfaceIdiom == .phone ? 20 : 0
+#else
+    0
+#endif
   }
 }
 
