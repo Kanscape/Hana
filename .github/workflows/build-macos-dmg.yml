@@ -91,9 +91,16 @@ jobs:
           rm -rf "$derived_data_path" "$staging_dir" "$artifact_dir"
           mkdir -p "$staging_dir" "$artifact_dir"
 
-          version_arguments=()
+          build_settings=(
+            CURRENT_PROJECT_VERSION="$BUILD_NUMBER"
+            HANA_BUILD_CHANNEL="$BUILD_CHANNEL"
+            HANA_BUILD_LABEL="$BUILD_LABEL"
+            CODE_SIGN_IDENTITY=""
+            CODE_SIGNING_REQUIRED=NO
+            CODE_SIGNING_ALLOWED=NO
+          )
           if [ -n "$RELEASE_VERSION" ]; then
-            version_arguments+=(MARKETING_VERSION="$RELEASE_VERSION")
+            build_settings+=(MARKETING_VERSION="$RELEASE_VERSION")
           fi
 
           xcodebuild clean build \
@@ -102,13 +109,7 @@ jobs:
             -configuration Release \
             -destination "generic/platform=macOS" \
             -derivedDataPath "$derived_data_path" \
-            "${version_arguments[@]}" \
-            CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
-            HANA_BUILD_CHANNEL="$BUILD_CHANNEL" \
-            HANA_BUILD_LABEL="$BUILD_LABEL" \
-            CODE_SIGN_IDENTITY="" \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGNING_ALLOWED=NO
+            "${build_settings[@]}"
 
           app_path="$(find "$products_path" -name "${SCHEME}.app" -type d | head -n 1)"
 
