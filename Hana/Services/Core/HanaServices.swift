@@ -21,12 +21,13 @@ final class HanaServices {
 #endif
 
     init(baseURL: URL = HanaServices.configuredBaseURL()) {
-        let httpClient = HanaHTTPClient(baseURL: baseURL)
+        let sessionCookieStore = HanaSessionCookieStore()
+        let httpClient = HanaHTTPClient(baseURL: baseURL, sessionCookieStore: sessionCookieStore)
         let imagePipeline = HanaImagePipeline.make()
         let parser = HanimeHTMLParser(baseURL: baseURL)
         self.httpClient = httpClient
         self.imagePipeline = imagePipeline
-        self.siteSession = SiteWebSession(baseURL: baseURL)
+        self.siteSession = SiteWebSession(baseURL: baseURL, cookieStore: sessionCookieStore)
         self.repository = HanimeRepository(httpClient: httpClient, parser: parser)
         self.downloadClient = HanimeDownloadClient(httpClient: httpClient)
         self.networkMonitor = HanaNetworkMonitor()
@@ -56,10 +57,10 @@ final class HanaServices {
         await profileAvatarStore.refreshAvatar(from: user?.avatarURL, ownerID: user?.id)
     }
 
-    func logout() {
+    func logout() async {
         repository.clearVideoCache()
         videoPlaybackStore.removeAll()
-        siteSession.logout()
+        await siteSession.logout()
         profileAvatarStore.clear()
     }
 

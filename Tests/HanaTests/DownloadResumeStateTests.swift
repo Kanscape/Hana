@@ -633,7 +633,14 @@ struct DownloadResumeStateTests {
         defaults.set(concurrency, forKey: HanaSettingsKey.downloadConcurrency)
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [ControlledDownloadURLProtocol.self]
-        let httpClient = HanaHTTPClient(baseURL: URL(string: "https://downloads.test/")!)
+        let sessionCookieStore = HanaSessionCookieStore(
+            credentialStore: DownloadResumeCredentialStore(),
+            defaults: defaults
+        )
+        let httpClient = HanaHTTPClient(
+            baseURL: URL(string: "https://downloads.test/")!,
+            sessionCookieStore: sessionCookieStore
+        )
         let client = HanimeDownloadClient(
             httpClient: httpClient,
             defaults: defaults,
@@ -663,6 +670,12 @@ struct DownloadResumeStateTests {
         }
         return condition()
     }
+}
+
+private struct DownloadResumeCredentialStore: HanaCredentialStore {
+    func data(for account: String) throws -> Data? { nil }
+    func set(_ data: Data, for account: String) throws {}
+    func removeData(for account: String) throws {}
 }
 
 @MainActor

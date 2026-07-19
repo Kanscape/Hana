@@ -892,19 +892,17 @@ private struct DownloadSettingsScreen: View {
                 } label: {
                     Label("导出到外部目录", systemImage: "square.and.arrow.up")
                 }
-                .disabled(HanaDownloadDirectoryPreference.resolvedExternalDirectory() == nil)
+                .disabled(!HanaDownloadDirectoryPreference.hasExternalDirectoryBookmark())
 
                 Button {
                     importDownloadsFromExternalDirectory()
                 } label: {
                     Label("从外部目录导入", systemImage: "square.and.arrow.down")
                 }
-                .disabled(HanaDownloadDirectoryPreference.resolvedExternalDirectory() == nil)
+                .disabled(!HanaDownloadDirectoryPreference.hasExternalDirectoryBookmark())
 
                 Button(role: .destructive) {
-                    HanaDownloadDirectoryPreference.clear()
-                    refreshDownloadDirectoryName()
-                    toastMessage = .success("已改回应用目录")
+                    useApplicationDownloadDirectory()
                 } label: {
                     Label("使用应用目录", systemImage: "internaldrive")
                 }
@@ -932,14 +930,27 @@ private struct DownloadSettingsScreen: View {
         do {
             guard let url = try result.get().first else { return }
             let didStartAccessing = url.startAccessingSecurityScopedResource()
+            guard didStartAccessing else {
+                throw HanaDownloadDirectoryError.accessDenied
+            }
             defer {
-                if didStartAccessing {
-                    url.stopAccessingSecurityScopedResource()
-                }
+                url.stopAccessingSecurityScopedResource()
             }
             try HanaDownloadDirectoryPreference.saveExternalDirectory(url)
+            try services.downloadClient.refreshExternalDirectoryAccess()
             refreshDownloadDirectoryName()
             toastMessage = .success("已选择 \(url.lastPathComponent)")
+        } catch {
+            alertMessage = .error(error.localizedDescription)
+        }
+    }
+
+    private func useApplicationDownloadDirectory() {
+        HanaDownloadDirectoryPreference.clear()
+        do {
+            try services.downloadClient.refreshExternalDirectoryAccess()
+            refreshDownloadDirectoryName()
+            toastMessage = .success("已改回应用目录")
         } catch {
             alertMessage = .error(error.localizedDescription)
         }
@@ -956,7 +967,9 @@ private struct DownloadSettingsScreen: View {
     private func exportDownloadsToExternalDirectory() {
         do {
             let count = try services.downloadClient.exportDownloadsToExternalDirectory()
-            toastMessage = .success("已导出 \(count) 个文件")
+            toastMessage = count > 0
+                ? .success("已导出 \(count) 个文件")
+                : .info("应用目录中没有可导出的下载文件")
         } catch {
             alertMessage = .error(error.localizedDescription)
         }
@@ -965,14 +978,21 @@ private struct DownloadSettingsScreen: View {
     private func importDownloadsFromExternalDirectory() {
         do {
             let count = try services.downloadClient.importDownloadsFromExternalDirectory()
-            toastMessage = .success("已导入 \(count) 个文件")
+            toastMessage = count > 0
+                ? .success("已导入 \(count) 个文件")
+                : .info("外部目录中没有可导入的下载文件")
         } catch {
             alertMessage = .error(error.localizedDescription)
         }
     }
 
     private func refreshDownloadDirectoryName() {
-        downloadDirectoryName = HanaDownloadDirectoryPreference.displayName()
+        do {
+            downloadDirectoryName = try HanaDownloadDirectoryPreference.resolvedExternalDirectory()?.lastPathComponent ?? "应用目录"
+        } catch {
+            downloadDirectoryName = "需要重新选择"
+            alertMessage = .error(error.localizedDescription)
+        }
     }
 }
 
@@ -1170,7 +1190,7 @@ private struct NetworkSettingsScreen: View {
                     Label("站点验证", systemImage: "shield")
                 }
                 Button(role: .destructive) {
-                    services.logout()
+                    Task { await services.logout() }
                 } label: {
                     Label("清除站点登录状态", systemImage: "trash")
                 }
@@ -1321,6 +1341,7 @@ private struct LocalDataSettingsScreen: View {
     @Query(sort: \HKeyframeRecord.updatedAt, order: .reverse) private var hKeyframeRecords: [HKeyframeRecord]
     @State private var pendingDeletion: LocalDataDeletionTarget?
     @State private var toastMessage: HanaToastMessage?
+    @State private var alertMessage: HanaAlertMessage?
 
     var body: some View {
         Form {
@@ -1393,6 +1414,7 @@ private struct LocalDataSettingsScreen: View {
         }
         .navigationTitle("本地数据")
         .hanaToast($toastMessage)
+        .hanaFeedbackAlert($alertMessage)
         .confirmationDialog(
             pendingDeletion?.confirmationTitle ?? "删除数据",
             isPresented: deletionDialogBinding,
@@ -1432,44 +1454,61 @@ private struct LocalDataSettingsScreen: View {
     }
 
     private func delete(_ target: LocalDataDeletionTarget) {
-        switch target {
-        case .watchHistory:
-            watchHistory.forEach(modelContext.delete)
-        case .searchHistory:
-            searchHistory.forEach(modelContext.delete)
-            advancedSearchHistory.forEach(modelContext.delete)
-        case .downloads:
-            deleteDownloadFiles()
-            downloadQueue.forEach(modelContext.delete)
-        case .hKeyframes:
-            hKeyframeRecords.forEach(modelContext.delete)
-        case .all:
-            watchHistory.forEach(modelContext.delete)
-            searchHistory.forEach(modelContext.delete)
-            advancedSearchHistory.forEach(modelContext.delete)
-            deleteDownloadFiles()
-            downloadQueue.forEach(modelContext.delete)
-            hKeyframeRecords.forEach(modelContext.delete)
+        var downloadDeletionError: Error?
+        do {
+            switch target {
+            case .watchHistory:
+                watchHistory.forEach(modelContext.delete)
+            case .searchHistory:
+                searchHistory.forEach(modelContext.delete)
+                advancedSearchHistory.forEach(modelContext.delete)
+            case .downloads:
+                downloadDeletionError = deleteDownloads()
+            case .hKeyframes:
+                hKeyframeRecords.forEach(modelContext.delete)
+            case .all:
+                downloadDeletionError = deleteDownloads()
+                watchHistory.forEach(modelContext.delete)
+                searchHistory.forEach(modelContext.delete)
+                advancedSearchHistory.forEach(modelContext.delete)
+                hKeyframeRecords.forEach(modelContext.delete)
+            }
+            try modelContext.save()
+            pendingDeletion = nil
+            if let downloadDeletionError {
+                let prefix = target == .all ? "其他本地数据已删除；" : ""
+                let message =
+                    "\(prefix)部分下载文件未能删除，相关下载记录已保留："
+                    + downloadDeletionError.localizedDescription
+                alertMessage = .error(message)
+            } else {
+                toastMessage = .success("\(target.title)已删除")
+            }
+        } catch {
+            alertMessage = .error(error.localizedDescription)
         }
-        try? modelContext.save()
-        toastMessage = .success("\(target.title)已删除")
-        pendingDeletion = nil
     }
 
-    private func deleteDownloadFiles() {
+    private func deleteDownloads() -> Error? {
+        var firstError: Error?
         for item in downloadQueue {
             services.downloadClient.cancel(id: item.id)
-            guard let localFileURLString = item.localFileURLString,
-                  let url = URL(string: localFileURLString),
-                  FileManager.default.fileExists(atPath: url.path) else {
-                continue
+            if let localFileURLString = item.localFileURLString,
+               let url = URL(string: localFileURLString) {
+                do {
+                    try services.downloadClient.deleteLocalDownload(fileURL: url)
+                } catch {
+                    firstError = firstError ?? error
+                    continue
+                }
             }
-            try? services.downloadClient.deleteLocalDownload(fileURL: url)
+            modelContext.delete(item)
         }
+        return firstError
     }
 }
 
-private enum LocalDataDeletionTarget: Identifiable {
+private enum LocalDataDeletionTarget: Identifiable, Equatable {
     case watchHistory
     case searchHistory
     case downloads
