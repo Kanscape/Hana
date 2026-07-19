@@ -539,7 +539,11 @@ struct RelatedVideosSection: View {
                 Text("相关影片")
                     .font(.headline)
 
-                HanaVideoGridLinks(videos: videos)
+                HanaVideoGridLinks(
+                    videos: videos,
+                    normalMinimumWidth: 150,
+                    portraitMinimumWidth: 150
+                )
             }
         }
     }
