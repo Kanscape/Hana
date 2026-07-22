@@ -1,10 +1,12 @@
 import Foundation
+import Observation
 
 enum HanimeVideoCachePolicy: Equatable {
     case returnCacheDataElseLoad
     case reloadIgnoringCache
 }
 
+@Observable
 final class HanimeRepository {
     private struct CachedVideo {
         let video: HanimeVideo
@@ -13,9 +15,10 @@ final class HanimeRepository {
 
     private static let maximumVideoCacheCount = 12
 
-    private let httpClient: HanaHTTPClient
-    private let parser: HanimeHTMLParser
-    private var videoCache: [String: CachedVideo] = [:]
+    @ObservationIgnored private let httpClient: HanaHTTPClient
+    @ObservationIgnored private let parser: HanimeHTMLParser
+    @ObservationIgnored private var videoCache: [String: CachedVideo] = [:]
+    private(set) var favoriteRevision = 0
 
     init(httpClient: HanaHTTPClient, parser: HanimeHTMLParser) {
         self.httpClient = httpClient
@@ -167,6 +170,23 @@ final class HanimeRepository {
             ],
             csrfToken: video.csrfToken
         )
+        updateCachedFavorite(video: video, shouldFavorite: shouldFavorite)
+    }
+
+    private func updateCachedFavorite(video: HanimeVideo, shouldFavorite: Bool) {
+        let source = videoCache[video.videoCode]?.video ?? video
+        let updatedCount = source.favoriteCount.map { count in
+            guard source.isFavorite != shouldFavorite else { return count }
+            return max(count + (shouldFavorite ? 1 : -1), 0)
+        }
+        storeCachedVideo(
+            source.updatingFavorite(
+                isFavorite: shouldFavorite,
+                favoriteCount: updatedCount
+            ),
+            code: source.videoCode
+        )
+        favoriteRevision &+= 1
     }
 
     func setVideoWatchLater(video: HanimeVideo, shouldSave: Bool) async throws {
