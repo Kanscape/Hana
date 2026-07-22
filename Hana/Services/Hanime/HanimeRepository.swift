@@ -268,6 +268,10 @@ final class HanimeRepository {
 
     func deleteAccountVideo(kind: HanimeMyListKind, videoCode: String, csrfToken: String?) async throws {
         try await deletePlaylistItem(listCode: kind.rawValue, videoCode: videoCode, csrfToken: csrfToken)
+        guard kind == .favorites, let cached = cachedVideo(code: videoCode) else {
+            return
+        }
+        updateCachedFavorite(video: cached, shouldFavorite: false)
     }
 
     func setArtistSubscribed(artist: HanimeArtist, shouldSubscribe: Bool, csrfToken: String?) async throws {

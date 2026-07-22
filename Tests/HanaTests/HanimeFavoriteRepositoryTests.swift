@@ -80,11 +80,43 @@ struct HanimeFavoriteRepositoryTests {
         #expect(repository.favoriteRevision == 0)
     }
 
+    @Test("removing a favorite from the account list updates the cached video and revision")
     @MainActor
-    private func makeRepository(html: String, postStatusCode: Int) throws -> (HanimeRepository, URLSession) {
+    func removingFavoriteFromAccountList() async throws {
+        let (repository, session) = try makeRepository(
+            html: videoHTML(isFavorite: true, favoriteCount: 7),
+            postStatusCode: 200,
+            deleteResponseData: Data(#"{"success":true}"#.utf8)
+        )
+        defer {
+            session.invalidateAndCancel()
+            FavoriteRepositoryURLProtocol.reset()
+        }
+
+        _ = try await repository.video(code: "9001")
+        try await repository.deleteAccountVideo(
+            kind: .favorites,
+            videoCode: "9001",
+            csrfToken: "token"
+        )
+
+        let cached = try #require(repository.cachedVideo(code: "9001"))
+        #expect(!cached.isFavorite)
+        #expect(cached.favoriteCount == 6)
+        #expect(repository.favoriteRevision == 1)
+        #expect(FavoriteRepositoryURLProtocol.lastMethod == "DELETE")
+    }
+
+    @MainActor
+    private func makeRepository(
+        html: String,
+        postStatusCode: Int,
+        deleteResponseData: Data? = nil
+    ) throws -> (HanimeRepository, URLSession) {
         FavoriteRepositoryURLProtocol.reset(
             responseData: Data(html.utf8),
-            postStatusCode: postStatusCode
+            postStatusCode: postStatusCode,
+            deleteResponseData: deleteResponseData
         )
 
         let configuration = URLSessionConfiguration.ephemeral
@@ -136,6 +168,7 @@ private struct FavoriteRepositoryCredentialStore: HanaCredentialStore {
 nonisolated private final class FavoriteRepositoryURLProtocol: URLProtocol, @unchecked Sendable {
     private static let lock = NSLock()
     private static var responseData = Data()
+    private static var deleteResponseData: Data?
     private static var postStatusCode = 200
     private static var method: String?
 
@@ -145,10 +178,15 @@ nonisolated private final class FavoriteRepositoryURLProtocol: URLProtocol, @unc
         return method
     }
 
-    static func reset(responseData: Data = Data(), postStatusCode: Int = 200) {
+    static func reset(
+        responseData: Data = Data(),
+        postStatusCode: Int = 200,
+        deleteResponseData: Data? = nil
+    ) {
         lock.lock()
         Self.responseData = responseData
         Self.postStatusCode = postStatusCode
+        Self.deleteResponseData = deleteResponseData
         Self.method = nil
         lock.unlock()
     }
@@ -170,7 +208,7 @@ nonisolated private final class FavoriteRepositoryURLProtocol: URLProtocol, @unc
         Self.lock.lock()
         Self.method = request.httpMethod
         let statusCode = request.httpMethod == "POST" ? Self.postStatusCode : 200
-        let data = Self.responseData
+        let data = request.httpMethod == "DELETE" ? (Self.deleteResponseData ?? Self.responseData) : Self.responseData
         Self.lock.unlock()
 
         guard let response = HTTPURLResponse(
