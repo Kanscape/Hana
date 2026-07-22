@@ -68,6 +68,9 @@ struct VideoDetailScreen: View {
         .onChange(of: services.siteSession.lastCookieSyncAt) {
             Task { await reloadAfterCookieSyncIfNeeded() }
         }
+        .onChange(of: services.repository.favoriteRevision) { _, _ in
+            syncFavoriteStateFromRepository()
+        }
         .alert("当前网络可能按流量计费", isPresented: automaticDownloadMobileDataAlertBinding) {
             Button("继续下载") {
                 continueAutomaticDownload()
@@ -239,6 +242,16 @@ struct VideoDetailScreen: View {
         case .loaded:
             return
         }
+    }
+
+    private func syncFavoriteStateFromRepository() {
+        guard case .loaded(let current) = state,
+              let cached = services.repository.cachedVideo(code: videoCode),
+              cached != current else {
+            return
+        }
+        syncPlaybackSelection(for: cached)
+        state = .loaded(cached)
     }
 
     @ViewBuilder

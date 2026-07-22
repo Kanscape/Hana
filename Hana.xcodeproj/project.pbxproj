@@ -36,6 +36,7 @@
 		F4A1000B2FB800000000000B /* home-recommendations-unknown.html in Resources */ = {isa = PBXBuildFile; fileRef = F4A100062FB8000000000006 /* home-recommendations-unknown.html */; };
 		F4FADE022FB900000C55FF9 /* HanaHorizontalFadeMetricsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4FADE012FB900000C55FF9 /* HanaHorizontalFadeMetricsTests.swift */; };
 		F4A11D022FB900000C55FF9 /* HanaCompleteGridRowsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4A11D012FB900000C55FF9 /* HanaCompleteGridRowsTests.swift */; };
+		F4FAFE022FB900000C55FF9 /* HanimeFavoriteRepositoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4FAFE012FB900000C55FF9 /* HanimeFavoriteRepositoryTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -78,6 +79,7 @@
 		F4A100062FB8000000000006 /* home-recommendations-unknown.html */ = {isa = PBXFileReference; lastKnownFileType = text.html; path = "home-recommendations-unknown.html"; sourceTree = "<group>"; };
 		F4FADE012FB900000C55FF9 /* HanaHorizontalFadeMetricsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HanaHorizontalFadeMetricsTests.swift; sourceTree = "<group>"; };
 		F4A11D012FB900000C55FF9 /* HanaCompleteGridRowsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HanaCompleteGridRowsTests.swift; sourceTree = "<group>"; };
+		F4FAFE012FB900000C55FF9 /* HanimeFavoriteRepositoryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HanimeFavoriteRepositoryTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -161,6 +163,7 @@
 				F44DB4D12FB790000C55FF9 /* HanimeRelatedVideosParserTests.swift */,
 				F4A100012FB8000000000001 /* HanimeHomeParserTests.swift */,
 				F4A100022FB8000000000002 /* HanimeHomeRepositoryTests.swift */,
+				F4FAFE012FB900000C55FF9 /* HanimeFavoriteRepositoryTests.swift */,
 				F4A100032FB8000000000003 /* Fixtures */,
 			);
 			path = HanaTests;
@@ -342,6 +345,7 @@
 				F44DB4D02FB790000C55FF9 /* HanimeRelatedVideosParserTests.swift in Sources */,
 				F4A100072FB8000000000007 /* HanimeHomeParserTests.swift in Sources */,
 				F4A100082FB8000000000008 /* HanimeHomeRepositoryTests.swift in Sources */,
+				F4FAFE022FB900000C55FF9 /* HanimeFavoriteRepositoryTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

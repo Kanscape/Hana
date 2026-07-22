@@ -317,6 +317,12 @@ struct VideoLibraryActionsView: View {
             playlists = video.listState?.playlists ?? []
             actionErrorMessage = nil
         }
+        .onChange(of: video.isFavorite) { _, newValue in
+            isFavorite = newValue
+        }
+        .onChange(of: video.favoriteCount) { _, newValue in
+            favoriteCount = newValue
+        }
     }
 
     private func openLogin() {

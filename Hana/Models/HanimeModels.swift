@@ -402,6 +402,31 @@ struct HanimeVideo: Identifiable, Hashable, Sendable {
     let listState: HanimeVideoListState?
 }
 
+extension HanimeVideo {
+    func updatingFavorite(isFavorite: Bool, favoriteCount: Int?) -> HanimeVideo {
+        HanimeVideo(
+            videoCode: videoCode,
+            title: title,
+            coverURL: coverURL,
+            chineseTitle: chineseTitle,
+            introduction: introduction,
+            uploadTime: uploadTime,
+            views: views,
+            tags: tags,
+            resolutions: resolutions,
+            relatedVideos: relatedVideos,
+            series: series,
+            originalComicURL: originalComicURL,
+            favoriteCount: favoriteCount,
+            isFavorite: isFavorite,
+            csrfToken: csrfToken,
+            currentUserID: currentUserID,
+            artist: artist,
+            listState: listState
+        )
+    }
+}
+
 struct HanimeCommentPost: Hashable, Sendable {
     let foreignID: String?
     let isPositive: Bool

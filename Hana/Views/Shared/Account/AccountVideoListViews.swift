@@ -41,8 +41,10 @@ struct AccountVideoListScreen: View {
     let loginMessage: String
     @State private var state: LoadableState<HanimeAccountVideoList> = .idle
     @State private var currentPage = 1
+    @State private var isRefreshing = false
     @State private var isLoadingMore = false
     @State private var isDeleting = false
+    @State private var hasPendingAccountRefresh = false
     @State private var toastMessage: HanaToastMessage?
     @State private var alertMessage: HanaAlertMessage?
     @State private var filterText = ""
@@ -128,14 +130,22 @@ struct AccountVideoListScreen: View {
             Text("会从当前列表移除。")
         }
         .task(id: services.siteSession.userID) {
-            if services.siteSession.isLoggedIn, case .idle = state {
+            if services.siteSession.isLoggedIn {
                 await loadCurrent(page: 1, append: false)
             }
         }
         .onChange(of: services.siteSession.lastCookieSyncAt) {
-            if services.siteSession.isLoggedIn {
-                Task { await loadCurrent(page: 1, append: false) }
-            }
+            guard services.siteSession.isLoggedIn else { return }
+            hasPendingAccountRefresh = true
+            schedulePendingAccountRefreshIfNeeded()
+        }
+        .onAppear {
+            refreshWhenVisible()
+        }
+        .onChange(of: services.repository.favoriteRevision) { _, _ in
+            guard kind == .favorites else { return }
+            hasPendingAccountRefresh = true
+            schedulePendingAccountRefreshIfNeeded()
         }
     }
 
@@ -210,6 +220,9 @@ struct AccountVideoListScreen: View {
                         }
                     }
                 }
+                .refreshable {
+                    await loadCurrent(page: 1, append: false)
+                }
             }
         case .failed(let message):
             ContentUnavailableView {
@@ -224,6 +237,27 @@ struct AccountVideoListScreen: View {
 
     private func openLogin() {
         services.siteSession.requestLogin()
+    }
+
+    private func refreshWhenVisible() {
+        guard services.siteSession.isLoggedIn,
+              services.siteSession.userID != nil,
+              case .loaded = state else {
+            return
+        }
+        Task { await loadCurrent(page: 1, append: false) }
+    }
+
+    private func schedulePendingAccountRefreshIfNeeded() {
+        guard hasPendingAccountRefresh,
+              services.siteSession.isLoggedIn,
+              services.siteSession.userID != nil,
+              !isRefreshing,
+              !isLoadingMore,
+              !isDeleting else {
+            return
+        }
+        Task { await loadCurrent(page: 1, append: false) }
     }
 
     @ViewBuilder
@@ -324,13 +358,28 @@ struct AccountVideoListScreen: View {
     }
 
     private func load(userID: String, page: Int, append: Bool) async {
+        let previousState = state
         if append {
-            guard !isLoadingMore else { return }
+            guard !isLoadingMore, !isRefreshing, !isDeleting else { return }
             isLoadingMore = true
         } else {
-            state = .loading
+            guard !isRefreshing, !isLoadingMore, !isDeleting else { return }
+            isRefreshing = true
+            hasPendingAccountRefresh = false
+            if case .loaded = state {
+                // Keep the current page visible while a refresh replaces it.
+            } else {
+                state = .loading
+            }
         }
-        defer { isLoadingMore = false }
+        defer {
+            if append {
+                isLoadingMore = false
+            } else {
+                isRefreshing = false
+            }
+            schedulePendingAccountRefreshIfNeeded()
+        }
 
         do {
             let newPage = try await services.repository.accountVideos(kind: kind, userID: userID, page: page)
@@ -340,17 +389,28 @@ struct AccountVideoListScreen: View {
                 state = .loaded(newPage)
             }
             currentPage = page
+        } catch is CancellationError {
+            return
         } catch {
-            if services.siteSession.handle(error) {
-                state = .failed("需要 Cloudflare 验证")
+            if !append, case .loaded = previousState {
+                state = previousState
+                if services.siteSession.handle(error) {
+                    alertMessage = .error("需要 Cloudflare 验证")
+                } else {
+                    alertMessage = .error(error.localizedDescription)
+                }
             } else {
-                state = .failed(error.localizedDescription)
+                if services.siteSession.handle(error) {
+                    state = .failed("需要 Cloudflare 验证")
+                } else {
+                    state = .failed(error.localizedDescription)
+                }
             }
         }
     }
 
     private func loadNextPageIfNeeded(maxPage: Int) {
-        guard currentPage < maxPage, !isLoadingMore else { return }
+        guard currentPage < maxPage, !isLoadingMore, !isRefreshing else { return }
         Task { await loadCurrent(page: currentPage + 1, append: true) }
     }
 
@@ -372,7 +432,10 @@ struct AccountVideoListScreen: View {
         guard !videos.isEmpty else { return }
 
         isDeleting = true
-        defer { isDeleting = false }
+        defer {
+            isDeleting = false
+            schedulePendingAccountRefreshIfNeeded()
+        }
 
         do {
             for video in videos {
