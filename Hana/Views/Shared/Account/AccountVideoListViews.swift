@@ -142,7 +142,7 @@ struct AccountVideoListScreen: View {
             refreshWhenVisible()
         }
         .onChange(of: services.repository.favoriteRevision) { _, _ in
-            guard kind == .favorites, case .loaded = state else { return }
+            guard kind == .favorites, !isDeleting, case .loaded = state else { return }
             Task { await loadCurrent(page: 1, append: false) }
         }
     }
