@@ -44,6 +44,7 @@ struct AccountVideoListScreen: View {
     @State private var isRefreshing = false
     @State private var isLoadingMore = false
     @State private var isDeleting = false
+    @State private var hasPendingFavoriteRefresh = false
     @State private var toastMessage: HanaToastMessage?
     @State private var alertMessage: HanaAlertMessage?
     @State private var filterText = ""
@@ -142,8 +143,9 @@ struct AccountVideoListScreen: View {
             refreshWhenVisible()
         }
         .onChange(of: services.repository.favoriteRevision) { _, _ in
-            guard kind == .favorites, !isDeleting, case .loaded = state else { return }
-            Task { await loadCurrent(page: 1, append: false) }
+            guard kind == .favorites else { return }
+            hasPendingFavoriteRefresh = true
+            schedulePendingFavoriteRefreshIfNeeded()
         }
     }
 
@@ -240,6 +242,18 @@ struct AccountVideoListScreen: View {
     private func refreshWhenVisible() {
         guard services.siteSession.isLoggedIn,
               services.siteSession.userID != nil,
+              case .loaded = state else {
+            return
+        }
+        Task { await loadCurrent(page: 1, append: false) }
+    }
+
+    private func schedulePendingFavoriteRefreshIfNeeded() {
+        guard kind == .favorites,
+              hasPendingFavoriteRefresh,
+              !isRefreshing,
+              !isLoadingMore,
+              !isDeleting,
               case .loaded = state else {
             return
         }
@@ -346,11 +360,14 @@ struct AccountVideoListScreen: View {
     private func load(userID: String, page: Int, append: Bool) async {
         let previousState = state
         if append {
-            guard !isLoadingMore, !isRefreshing else { return }
+            guard !isLoadingMore, !isRefreshing, !isDeleting else { return }
             isLoadingMore = true
         } else {
-            guard !isRefreshing, !isLoadingMore else { return }
+            guard !isRefreshing, !isLoadingMore, !isDeleting else { return }
             isRefreshing = true
+            if kind == .favorites {
+                hasPendingFavoriteRefresh = false
+            }
             if case .loaded = state {
                 // Keep the current page visible while a refresh replaces it.
             } else {
@@ -363,6 +380,7 @@ struct AccountVideoListScreen: View {
             } else {
                 isRefreshing = false
             }
+            schedulePendingFavoriteRefreshIfNeeded()
         }
 
         do {
@@ -416,7 +434,10 @@ struct AccountVideoListScreen: View {
         guard !videos.isEmpty else { return }
 
         isDeleting = true
-        defer { isDeleting = false }
+        defer {
+            isDeleting = false
+            schedulePendingFavoriteRefreshIfNeeded()
+        }
 
         do {
             for video in videos {

@@ -107,6 +107,30 @@ struct HanimeFavoriteRepositoryTests {
         #expect(FavoriteRepositoryURLProtocol.lastMethod == "DELETE")
     }
 
+    @Test("removing an uncached favorite still increments the revision")
+    @MainActor
+    func removingUncachedFavoriteFromAccountList() async throws {
+        let (repository, session) = try makeRepository(
+            html: videoHTML(isFavorite: true, favoriteCount: 7),
+            postStatusCode: 200,
+            deleteResponseData: Data(#"{"success":true}"#.utf8)
+        )
+        defer {
+            session.invalidateAndCancel()
+            FavoriteRepositoryURLProtocol.reset()
+        }
+
+        try await repository.deleteAccountVideo(
+            kind: .favorites,
+            videoCode: "9001",
+            csrfToken: "token"
+        )
+
+        #expect(repository.cachedVideo(code: "9001") == nil)
+        #expect(repository.favoriteRevision == 1)
+        #expect(FavoriteRepositoryURLProtocol.lastMethod == "DELETE")
+    }
+
     @MainActor
     private func makeRepository(
         html: String,
