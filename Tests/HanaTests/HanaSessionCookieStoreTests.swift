@@ -332,7 +332,7 @@ struct HanaSessionCookieStoreTests {
       try await Task.sleep(for: .milliseconds(10))
     }
 
-    guard session.activeFlow?.kind == .cloudflare else {
+    guard let flow = session.activeFlow, flow.kind == .cloudflare else {
       session.cancel()
       _ = await (first.value, second.value)
       Issue.record("The shared Cloudflare flow was not presented")
@@ -344,7 +344,7 @@ struct HanaSessionCookieStoreTests {
       name: SiteWebCookieScope.cloudflareClearanceName,
       expires: Date(timeIntervalSinceNow: 60)
     )
-    #expect(session.complete(with: [clearance]))
+    #expect(session.complete(flowID: flow.id, with: [clearance]))
     #expect(await first.value)
     #expect(await second.value)
     #expect(session.activeFlow == nil)
@@ -353,6 +353,293 @@ struct HanaSessionCookieStoreTests {
     #expect(session.lastCookieSyncAt == nil)
 
     HTTPCookieStorage.shared.deleteCookie(clearance)
+  }
+
+  @Test("a delayed challenge reuses a newer verification generation")
+  func delayedChallengeReusesVerificationGeneration() async throws {
+    let context = try TestContext()
+    defer { context.cleanup() }
+    let store = HanaSessionCookieStore(
+      credentialStore: TestCredentialStore(),
+      defaults: context.defaults
+    )
+    let url = try #require(URL(string: "https://generation.invalid/path"))
+    let session = SiteWebSession(baseURL: url, defaults: context.defaults, cookieStore: store)
+    let requestGeneration = session.cloudflareVerificationGeneration
+
+    let first = Task { @MainActor in
+      await session.resolveCloudflareChallenge(
+        at: url,
+        requestGeneration: requestGeneration
+      )
+    }
+    for _ in 0..<200 where session.activeFlow == nil {
+      try await Task.sleep(for: .milliseconds(10))
+    }
+    let flowID = try #require(session.activeFlow?.id)
+    let clearance = try makeCookie(
+      domain: "generation.invalid",
+      name: SiteWebCookieScope.cloudflareClearanceName,
+      expires: Date(timeIntervalSinceNow: 60)
+    )
+    #expect(session.complete(flowID: flowID, with: [clearance]))
+    #expect(await first.value)
+    #expect(session.cloudflareVerificationGeneration == requestGeneration + 1)
+
+    let delayedResult = await session.resolveCloudflareChallenge(
+      at: url,
+      requestGeneration: requestGeneration
+    )
+    #expect(delayedResult)
+    #expect(session.activeFlow == nil)
+    #expect(session.cloudflareVerificationGeneration == requestGeneration + 1)
+
+    HTTPCookieStorage.shared.deleteCookie(clearance)
+  }
+
+  @Test("stale flow callbacks cannot complete or cancel a newer flow")
+  func staleFlowCallbacksAreIgnored() async throws {
+    let context = try TestContext()
+    defer { context.cleanup() }
+    let store = HanaSessionCookieStore(
+      credentialStore: TestCredentialStore(),
+      defaults: context.defaults
+    )
+    let url = try #require(URL(string: "https://flow-identity.invalid/path"))
+    let session = SiteWebSession(baseURL: url, defaults: context.defaults, cookieStore: store)
+
+    await session.requestCloudflareVerification(url)
+    let firstFlowID = try #require(session.activeFlow?.id)
+    session.cancel(flowID: firstFlowID)
+    await session.requestCloudflareVerification(url)
+    let secondFlowID = try #require(session.activeFlow?.id)
+    #expect(firstFlowID != secondFlowID)
+
+    let clearance = try makeCookie(
+      domain: "flow-identity.invalid",
+      name: SiteWebCookieScope.cloudflareClearanceName,
+      expires: Date(timeIntervalSinceNow: 60)
+    )
+    session.cancel(flowID: firstFlowID)
+    #expect(!session.complete(flowID: firstFlowID, with: [clearance]))
+    #expect(session.activeFlow?.id == secondFlowID)
+    #expect(session.lastCloudflareVerifiedAt == nil)
+
+    #expect(session.complete(flowID: secondFlowID, with: [clearance]))
+    #expect(session.activeFlow == nil)
+
+    HTTPCookieStorage.shared.deleteCookie(clearance)
+  }
+
+  @Test("generic Cookie sync neither broadcasts nor restores clearance during recovery")
+  func genericCookieSyncIsSuppressedDuringRecovery() async throws {
+    let context = try TestContext()
+    defer { context.cleanup() }
+    let store = HanaSessionCookieStore(
+      credentialStore: TestCredentialStore(),
+      defaults: context.defaults
+    )
+    let url = try #require(URL(string: "https://sync-recovery.invalid/path"))
+    let session = SiteWebSession(baseURL: url, defaults: context.defaults, cookieStore: store)
+    let sessionCookie = try makeCookie(domain: "sync-recovery.invalid", name: "session")
+    let clearance = try makeCookie(
+      domain: "sync-recovery.invalid",
+      name: SiteWebCookieScope.cloudflareClearanceName,
+      expires: Date(timeIntervalSinceNow: 60)
+    )
+    session.sync(cookies: [sessionCookie])
+    let previousSyncAt = session.lastCookieSyncAt
+
+    let request = Task { @MainActor in await session.resolveCloudflareChallenge(at: url) }
+    for _ in 0..<200 where session.activeFlow == nil {
+      try await Task.sleep(for: .milliseconds(10))
+    }
+    session.sync(
+      cookies: [sessionCookie, clearance],
+      acceptsCloudflareClearance: false
+    )
+
+    #expect(session.lastCookieSyncAt == previousSyncAt)
+    #expect(store.cookieHeader(for: url) == "session=value")
+    #expect(HTTPCookieStorage.shared.cookies(for: url)?.contains {
+      $0.name == SiteWebCookieScope.cloudflareClearanceName
+    } != true)
+
+    session.cancel()
+    #expect(!(await request.value))
+    HTTPCookieStorage.shared.deleteCookie(sessionCookie)
+    HTTPCookieStorage.shared.deleteCookie(clearance)
+  }
+
+  @Test("a stale async Cookie snapshot cannot overwrite newer verification")
+  func staleAsyncCookieSnapshotIsDiscarded() async throws {
+    let context = try TestContext()
+    defer { context.cleanup() }
+    let store = HanaSessionCookieStore(
+      credentialStore: TestCredentialStore(),
+      defaults: context.defaults
+    )
+    let url = try #require(URL(string: "https://stale-sync.invalid/path"))
+    let session = SiteWebSession(baseURL: url, defaults: context.defaults, cookieStore: store)
+    let loader = ControlledCookieLoader()
+    let staleSession = try makeCookie(
+      domain: "stale-sync.invalid",
+      name: "session",
+      value: "stale"
+    )
+    let freshSession = try makeCookie(
+      domain: "stale-sync.invalid",
+      name: "session",
+      value: "fresh"
+    )
+    let clearance = try makeCookie(
+      domain: "stale-sync.invalid",
+      name: SiteWebCookieScope.cloudflareClearanceName,
+      expires: Date(timeIntervalSinceNow: 60)
+    )
+
+    let staleSync = Task { @MainActor in
+      await session.syncDefaultWebCookies { await loader.load() }
+    }
+    for _ in 0..<200 where !loader.didStart {
+      try await Task.sleep(for: .milliseconds(10))
+    }
+    #expect(loader.didStart)
+
+    let request = Task { @MainActor in await session.resolveCloudflareChallenge(at: url) }
+    for _ in 0..<200 where session.activeFlow == nil {
+      try await Task.sleep(for: .milliseconds(10))
+    }
+    let flowID = try #require(session.activeFlow?.id)
+    #expect(session.complete(flowID: flowID, with: [freshSession, clearance]))
+    #expect(await request.value)
+
+    loader.resume(with: [staleSession])
+    await staleSync.value
+
+    let persistedHeader = try #require(store.cookieHeader(for: url))
+    #expect(persistedHeader.contains("session=fresh"))
+    #expect(persistedHeader.contains("cf_clearance=value"))
+    #expect(!persistedHeader.contains("session=stale"))
+
+    HTTPCookieStorage.shared.deleteCookie(staleSession)
+    HTTPCookieStorage.shared.deleteCookie(freshSession)
+    HTTPCookieStorage.shared.deleteCookie(clearance)
+  }
+
+  @Test("invalidation cancels the active flow before deleting clearance")
+  func invalidationRejectsActiveFlowCompletion() async throws {
+    let context = try TestContext()
+    defer { context.cleanup() }
+    let store = HanaSessionCookieStore(
+      credentialStore: TestCredentialStore(),
+      defaults: context.defaults
+    )
+    let url = try #require(URL(string: "https://invalidate-active.invalid/path"))
+    let session = SiteWebSession(baseURL: url, defaults: context.defaults, cookieStore: store)
+    let request = Task { @MainActor in await session.resolveCloudflareChallenge(at: url) }
+    for _ in 0..<200 where session.activeFlow == nil {
+      try await Task.sleep(for: .milliseconds(10))
+    }
+    let staleFlowID = try #require(session.activeFlow?.id)
+    let clearance = try makeCookie(
+      domain: "invalidate-active.invalid",
+      name: SiteWebCookieScope.cloudflareClearanceName,
+      expires: Date(timeIntervalSinceNow: 60)
+    )
+
+    let invalidation = Task { @MainActor in
+      await session.invalidateCloudflareVerification()
+    }
+    for _ in 0..<200 where session.activeFlow != nil {
+      try await Task.sleep(for: .milliseconds(10))
+    }
+
+    #expect(!session.complete(flowID: staleFlowID, with: [clearance]))
+    await invalidation.value
+    #expect(!(await request.value))
+    #expect(session.activeFlow == nil)
+    #expect(session.lastCloudflareVerifiedAt == nil)
+    #expect(store.cookieHeader(for: url)?.contains("cf_clearance") != true)
+
+    HTTPCookieStorage.shared.deleteCookie(clearance)
+  }
+
+  @Test("new flows wait for an older physical invalidation to finish")
+  func invalidationIsSerializedAcrossFlows() async throws {
+    let context = try TestContext()
+    defer { context.cleanup() }
+    let store = HanaSessionCookieStore(
+      credentialStore: TestCredentialStore(),
+      defaults: context.defaults
+    )
+    let gate = ControlledInvalidationGate()
+    let url = try #require(URL(string: "https://serialized-invalidation.invalid/path"))
+    let session = SiteWebSession(
+      baseURL: url,
+      defaults: context.defaults,
+      cookieStore: store,
+      cloudflareWebInvalidator: { await gate.wait() }
+    )
+
+    let first = Task { @MainActor in await session.resolveCloudflareChallenge(at: url) }
+    for _ in 0..<200 where !gate.didStart {
+      try await Task.sleep(for: .milliseconds(10))
+    }
+    #expect(gate.didStart)
+    #expect(session.activeFlow == nil)
+
+    first.cancel()
+    #expect(!(await first.value))
+    session.requestLogin()
+    #expect(session.activeFlow == nil)
+
+    let second = Task { @MainActor in await session.resolveCloudflareChallenge(at: url) }
+    try await Task.sleep(for: .milliseconds(20))
+    #expect(session.activeFlow == nil)
+
+    gate.resume()
+    for _ in 0..<200 where session.activeFlow == nil {
+      try await Task.sleep(for: .milliseconds(10))
+    }
+    let flowID = try #require(session.activeFlow?.id)
+    #expect(session.activeFlow?.kind == .cloudflare)
+
+    let clearance = try makeCookie(
+      domain: "serialized-invalidation.invalid",
+      name: SiteWebCookieScope.cloudflareClearanceName,
+      expires: Date(timeIntervalSinceNow: 60)
+    )
+    #expect(session.complete(flowID: flowID, with: [clearance]))
+    #expect(await second.value)
+
+    HTTPCookieStorage.shared.deleteCookie(clearance)
+  }
+
+  @Test("login cannot replace a pending automatic Cloudflare flow")
+  func loginDoesNotStrandCloudflareWaiter() async throws {
+    let context = try TestContext()
+    defer { context.cleanup() }
+    let store = HanaSessionCookieStore(
+      credentialStore: TestCredentialStore(),
+      defaults: context.defaults
+    )
+    let url = try #require(URL(string: "https://login-race.invalid/path"))
+    let session = SiteWebSession(baseURL: url, defaults: context.defaults, cookieStore: store)
+    let request = Task { @MainActor in await session.resolveCloudflareChallenge(at: url) }
+    for _ in 0..<200 where !session.isCloudflareVerificationInProgress {
+      try await Task.sleep(for: .milliseconds(10))
+    }
+
+    session.requestLogin()
+    for _ in 0..<200 where session.activeFlow == nil {
+      try await Task.sleep(for: .milliseconds(10))
+    }
+    #expect(session.activeFlow?.kind == .cloudflare)
+
+    session.cancel()
+    #expect(!(await request.value))
+    #expect(session.activeFlow == nil)
   }
 
   @Test("cancelling Cloudflare verification releases every waiter")
@@ -399,6 +686,7 @@ struct HanaSessionCookieStoreTests {
 
     first.cancel()
     #expect(!(await first.value))
+    let flowID = try #require(session.activeFlow?.id)
     #expect(session.activeFlow?.kind == .cloudflare)
 
     let clearance = try makeCookie(
@@ -406,7 +694,7 @@ struct HanaSessionCookieStoreTests {
       name: SiteWebCookieScope.cloudflareClearanceName,
       expires: Date(timeIntervalSinceNow: 60)
     )
-    #expect(session.complete(with: [clearance]))
+    #expect(session.complete(flowID: flowID, with: [clearance]))
     #expect(await second.value)
     #expect(session.activeFlow == nil)
 
@@ -436,6 +724,37 @@ struct HanaSessionCookieStoreTests {
     #expect(session.activeFlow == nil)
     #expect(!session.isCloudflareVerificationInProgress)
     #expect(session.cloudflareStatusText == "需要验证")
+  }
+
+  @Test("task cancellation racing completion resumes the waiter once")
+  func cancellationRacingCompletion() async throws {
+    let context = try TestContext()
+    defer { context.cleanup() }
+    let store = HanaSessionCookieStore(
+      credentialStore: TestCredentialStore(),
+      defaults: context.defaults
+    )
+    let url = try #require(URL(string: "https://cancel-complete-race.invalid/path"))
+    let session = SiteWebSession(baseURL: url, defaults: context.defaults, cookieStore: store)
+    let request = Task { @MainActor in await session.resolveCloudflareChallenge(at: url) }
+    for _ in 0..<200 where session.activeFlow == nil {
+      try await Task.sleep(for: .milliseconds(10))
+    }
+    let flowID = try #require(session.activeFlow?.id)
+    let clearance = try makeCookie(
+      domain: "cancel-complete-race.invalid",
+      name: SiteWebCookieScope.cloudflareClearanceName,
+      expires: Date(timeIntervalSinceNow: 60)
+    )
+
+    request.cancel()
+    _ = session.complete(flowID: flowID, with: [clearance])
+
+    #expect(!(await request.value))
+    #expect(session.activeFlow == nil)
+    #expect(!session.isCloudflareVerificationInProgress)
+
+    HTTPCookieStorage.shared.deleteCookie(clearance)
   }
 
   @Test("an immediately cancelled Cloudflare request never leaves a flow")
@@ -481,6 +800,7 @@ struct HanaSessionCookieStoreTests {
     #expect(session.cloudflareStatusText == "需要验证")
     await session.requestCloudflareVerification(url)
     #expect(session.cloudflareStatusText == "验证中")
+    let flowID = try #require(session.activeFlow?.id)
 
     let expired = try makeCookie(
       domain: "completion.invalid",
@@ -492,8 +812,8 @@ struct HanaSessionCookieStoreTests {
       name: SiteWebCookieScope.cloudflareClearanceName,
       expires: currentTime.addingTimeInterval(60)
     )
-    #expect(!session.complete(with: [expired]))
-    #expect(!session.complete(with: [lookalike]))
+    #expect(!session.complete(flowID: flowID, with: [expired]))
+    #expect(!session.complete(flowID: flowID, with: [lookalike]))
     #expect(session.activeFlow?.kind == .cloudflare)
 
     let valid = try makeCookie(
@@ -501,7 +821,7 @@ struct HanaSessionCookieStoreTests {
       name: SiteWebCookieScope.cloudflareClearanceName,
       expires: currentTime.addingTimeInterval(60)
     )
-    #expect(session.complete(with: [valid]))
+    #expect(session.complete(flowID: flowID, with: [valid]))
     #expect(session.cloudflareStatusText == "已验证")
     currentTime = currentTime.addingTimeInterval(61)
     #expect(session.cloudflareStatusText == "已过期")
@@ -587,13 +907,14 @@ struct HanaSessionCookieStoreTests {
   private func makeCookie(
     domain: String,
     name: String,
+    value: String = "value",
     expires: Date? = nil
   ) throws -> HTTPCookie {
     var properties: [HTTPCookiePropertyKey: Any] = [
       .domain: domain,
       .path: "/",
       .name: name,
-      .value: "value",
+      .value: value,
       .secure: "TRUE",
     ]
     if let expires {
@@ -618,6 +939,44 @@ struct HanaSessionCookieStoreTests {
     await withCheckedContinuation { continuation in
       store.getAllCookies { continuation.resume(returning: $0) }
     }
+  }
+}
+
+@MainActor
+private final class ControlledInvalidationGate {
+  private var continuation: CheckedContinuation<Void, Never>?
+  private(set) var didStart = false
+
+  func wait() async {
+    didStart = true
+    await withCheckedContinuation { continuation in
+      self.continuation = continuation
+    }
+  }
+
+  func resume() {
+    let continuation = continuation
+    self.continuation = nil
+    continuation?.resume()
+  }
+}
+
+@MainActor
+private final class ControlledCookieLoader {
+  private var continuation: CheckedContinuation<[HTTPCookie], Never>?
+  private(set) var didStart = false
+
+  func load() async -> [HTTPCookie] {
+    didStart = true
+    return await withCheckedContinuation { continuation in
+      self.continuation = continuation
+    }
+  }
+
+  func resume(with cookies: [HTTPCookie]) {
+    let continuation = continuation
+    self.continuation = nil
+    continuation?.resume(returning: cookies)
   }
 }
 

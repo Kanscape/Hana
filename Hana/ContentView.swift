@@ -85,10 +85,14 @@ struct ContentView: View {
                 SiteWebSessionSheet(
                     flow: flow,
                     onComplete: { cookies in
-                        completeSiteWebFlow(with: cookies)
+                        completeSiteWebFlow(
+                            flowID: flow.id,
+                            kind: flow.kind,
+                            cookies: cookies
+                        )
                     },
                     onCancel: {
-                        services.siteSession.cancel()
+                        services.siteSession.cancel(flowID: flow.id)
                     }
                 )
             }
@@ -240,9 +244,12 @@ struct ContentView: View {
         }
     }
 
-    private func completeSiteWebFlow(with cookies: [HTTPCookie]) {
-        let kind = services.siteSession.activeFlow?.kind
-        services.siteSession.complete(with: cookies)
+    private func completeSiteWebFlow(
+        flowID: UUID,
+        kind: SiteWebFlowKind,
+        cookies: [HTTPCookie]
+    ) {
+        guard services.siteSession.complete(flowID: flowID, with: cookies) else { return }
         if kind == .login {
             Task { await refreshLoginState() }
         }

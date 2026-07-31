@@ -30,6 +30,42 @@ struct HanaHTTPClientCloudflareTests {
     #expect(requests.last?.headers["Cookie"]?.contains("cf_clearance") == true)
   }
 
+  @Test("a delayed concurrent challenge reuses the newer verification generation")
+  func delayedChallengeReusesGeneration() async throws {
+    let harness = try Harness(mode: .delayedConcurrentChallenges)
+    defer { harness.cleanup() }
+    harness.installFreshClearance()
+    let delayedURL = harness.baseURL.appending(path: "delayed")
+    let firstURL = harness.baseURL.appending(path: "first")
+
+    let request = Task { @MainActor in
+      try await harness.client.data(from: delayedURL)
+    }
+    for _ in 0..<200 where !ChallengeURLProtocol.hasPendingDelayedChallenge {
+      try await Task.sleep(for: .milliseconds(10))
+    }
+    guard ChallengeURLProtocol.hasPendingDelayedChallenge else {
+      request.cancel()
+      ChallengeURLProtocol.releaseDelayedChallenge()
+      _ = try? await request.value
+      Issue.record("The delayed request was not captured")
+      return
+    }
+
+    let firstData = try await harness.client.data(from: firstURL)
+    #expect(firstData == Data("ok".utf8))
+    #expect(harness.resolver.callCount == 1)
+
+    ChallengeURLProtocol.releaseDelayedChallenge()
+    let data = try await request.value
+
+    #expect(data == Data("ok".utf8))
+    #expect(harness.resolver.callCount == 1)
+    #expect(harness.resolver.reusedGenerationCount == 1)
+    #expect(ChallengeURLProtocol.capturedRequests.count == 4)
+    #expect(ChallengeURLProtocol.capturedRequests.last?.headers["Cookie"]?.contains("cf_clearance") == true)
+  }
+
   @Test("form POST retries with the same body and non-cookie headers")
   func postRetry() async throws {
     let harness = try Harness(mode: .firstChallengeThenSuccess)
@@ -116,6 +152,125 @@ struct HanaHTTPClientCloudflareTests {
     #expect(ChallengeURLProtocol.capturedRequests.count == 1)
   }
 
+  @Test("a child-host challenge does not use the base-host resolver")
+  func childHostChallengeDoesNotResolve() async throws {
+    let harness = try Harness(mode: .alwaysChallenge)
+    defer { harness.cleanup() }
+    let baseHost = try #require(harness.baseURL.host())
+    let url = try #require(URL(string: "https://api.\(baseHost)/forbidden"))
+
+    do {
+      _ = try await harness.client.data(from: url)
+      Issue.record("The child-host challenge unexpectedly succeeded")
+    } catch let error as HanaNetworkError {
+      guard case .httpStatus(let statusCode, let responseURL) = error else {
+        Issue.record("Unexpected network error: \(error.localizedDescription)")
+        return
+      }
+      #expect(statusCode == 403)
+      #expect(responseURL == url)
+    }
+
+    #expect(harness.resolver.callCount == 0)
+    #expect(ChallengeURLProtocol.capturedRequests.count == 1)
+  }
+
+  @Test("a redirected child-host challenge does not use the base-host resolver")
+  func redirectedChildHostChallengeDoesNotResolve() async throws {
+    let harness = try Harness(mode: .redirectedChildChallenge)
+    defer { harness.cleanup() }
+    let url = harness.baseURL.appending(path: "redirected")
+
+    do {
+      _ = try await harness.client.data(from: url)
+      Issue.record("The redirected child-host challenge unexpectedly succeeded")
+    } catch let error as HanaNetworkError {
+      guard case .httpStatus(let statusCode, _) = error else {
+        Issue.record("Unexpected network error: \(error.localizedDescription)")
+        return
+      }
+      #expect(statusCode == 403)
+    }
+
+    #expect(harness.resolver.callCount == 0)
+    #expect(ChallengeURLProtocol.capturedRequests.count == 1)
+  }
+
+  @Test("cancelling an HTTP task closes the real shared verification flow")
+  func cancelledHTTPTaskClosesVerification() async throws {
+    ChallengeURLProtocol.reset(mode: .alwaysChallenge)
+    let configuration = URLSessionConfiguration.ephemeral
+    configuration.protocolClasses = [ChallengeURLProtocol.self]
+    configuration.httpShouldSetCookies = false
+    configuration.httpCookieStorage = nil
+    let urlSession = URLSession(configuration: configuration)
+    let defaultsSuiteName = "HanaHTTPClientCloudflareCancellation.\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: defaultsSuiteName))
+    defaults.removePersistentDomain(forName: defaultsSuiteName)
+    let baseURL = try #require(URL(string: "https://http-cancel-\(UUID().uuidString).invalid/"))
+    let cookieStore = HanaSessionCookieStore(
+      credentialStore: HTTPTestCredentialStore(),
+      defaults: defaults
+    )
+    let siteSession = SiteWebSession(
+      baseURL: baseURL,
+      defaults: defaults,
+      cookieStore: cookieStore
+    )
+    let client = HanaHTTPClient(
+      baseURL: baseURL,
+      sessionCookieStore: cookieStore,
+      cloudflareChallengeResolver: siteSession,
+      session: urlSession
+    )
+    defer {
+      siteSession.cancel()
+      urlSession.invalidateAndCancel()
+      defaults.removePersistentDomain(forName: defaultsSuiteName)
+      ChallengeURLProtocol.reset(mode: .alwaysChallenge)
+    }
+
+    let request = Task { @MainActor in try await client.data(from: baseURL) }
+    for _ in 0..<200 where siteSession.activeFlow == nil {
+      try await Task.sleep(for: .milliseconds(10))
+    }
+    #expect(siteSession.activeFlow?.kind == .cloudflare)
+
+    request.cancel()
+    do {
+      _ = try await request.value
+      Issue.record("The cancelled HTTP task unexpectedly succeeded")
+    } catch is CancellationError {
+      // Expected.
+    }
+
+    #expect(siteSession.activeFlow == nil)
+    #expect(!siteSession.isCloudflareVerificationInProgress)
+    #expect(ChallengeURLProtocol.capturedRequests.count == 1)
+  }
+
+  @Test("a redirected child-host challenge on retry stays an HTTP error")
+  func redirectedRetryChallengeDoesNotFailBaseVerification() async throws {
+    let harness = try Harness(mode: .firstChallengeThenRedirectedChildChallenge)
+    defer { harness.cleanup() }
+    harness.installFreshClearance()
+
+    do {
+      _ = try await harness.client.data(from: harness.baseURL)
+      Issue.record("The redirected retry challenge unexpectedly succeeded")
+    } catch let error as HanaNetworkError {
+      guard case .httpStatus(let statusCode, _) = error else {
+        Issue.record("Unexpected network error: \(error.localizedDescription)")
+        return
+      }
+      #expect(statusCode == 403)
+    }
+
+    #expect(harness.resolver.callCount == 1)
+    #expect(harness.resolver.failureCount == 0)
+    #expect(ChallengeURLProtocol.capturedRequests.count == 2)
+  }
+
   @Test("cancelling verification does not retry")
   func cancelledVerificationDoesNotRetry() async throws {
     let harness = try Harness(mode: .alwaysChallenge, verificationResult: false)
@@ -139,7 +294,9 @@ struct HanaHTTPClientCloudflareTests {
 @MainActor
 private final class ControlledChallengeResolver: HanaCloudflareChallengeResolving {
   var result: Bool
+  var cloudflareVerificationGeneration: UInt64 = 0
   var callCount = 0
+  var reusedGenerationCount = 0
   var failureCount = 0
   var onResolve: (() -> Void)?
 
@@ -147,9 +304,20 @@ private final class ControlledChallengeResolver: HanaCloudflareChallengeResolvin
     self.result = result
   }
 
-  func resolveCloudflareChallenge(at url: URL) async -> Bool {
+  func resolveCloudflareChallenge(
+    at url: URL,
+    requestGeneration: UInt64
+  ) async -> Bool {
+    if requestGeneration < cloudflareVerificationGeneration, result {
+      reusedGenerationCount += 1
+      return true
+    }
+
     callCount += 1
     onResolve?()
+    if result {
+      cloudflareVerificationGeneration &+= 1
+    }
     return result
   }
 
@@ -233,6 +401,9 @@ nonisolated private final class ChallengeURLProtocol: URLProtocol, @unchecked Se
     case firstChallengeThenSuccess
     case alwaysChallenge
     case ordinaryCloudflareForbidden
+    case delayedConcurrentChallenges
+    case redirectedChildChallenge
+    case firstChallengeThenRedirectedChildChallenge
   }
 
   struct CapturedRequest: Sendable {
@@ -247,6 +418,13 @@ nonisolated private final class ChallengeURLProtocol: URLProtocol, @unchecked Se
   private static let lock = NSLock()
   private static var mode: Mode = .alwaysChallenge
   private static var requests: [CapturedRequest] = []
+  private static var pendingDelayedChallenge: ChallengeURLProtocol?
+
+  static var hasPendingDelayedChallenge: Bool {
+    lock.lock()
+    defer { lock.unlock() }
+    return pendingDelayedChallenge != nil
+  }
 
   static var capturedRequests: [CapturedRequest] {
     lock.lock()
@@ -258,7 +436,20 @@ nonisolated private final class ChallengeURLProtocol: URLProtocol, @unchecked Se
     lock.lock()
     self.mode = mode
     requests = []
+    pendingDelayedChallenge = nil
     lock.unlock()
+  }
+
+  static func releaseDelayedChallenge() {
+    lock.lock()
+    let pending = pendingDelayedChallenge
+    pendingDelayedChallenge = nil
+    lock.unlock()
+    pending?.sendResponse(
+      statusCode: 403,
+      headers: ["Content-Type": "text/html", "cf-mitigated": "challenge", "Server": "cloudflare"],
+      body: "challenge"
+    )
   }
 
   override class func canInit(with request: URLRequest) -> Bool {
@@ -283,10 +474,21 @@ nonisolated private final class ChallengeURLProtocol: URLProtocol, @unchecked Se
     Self.requests.append(captured)
     let requestNumber = Self.requests.count
     let mode = Self.mode
+    let hasClearance = captured.headers["Cookie"]?.contains("cf_clearance") == true
+    if mode == .delayedConcurrentChallenges,
+       request.url?.path == "/delayed",
+       !hasClearance {
+      Self.pendingDelayedChallenge = self
+      Self.lock.unlock()
+      return
+    }
     Self.lock.unlock()
 
     let isChallenge = mode == .alwaysChallenge
+      || mode == .redirectedChildChallenge
+      || mode == .firstChallengeThenRedirectedChildChallenge
       || (mode == .firstChallengeThenSuccess && requestNumber == 1)
+      || (mode == .delayedConcurrentChallenges && !hasClearance)
     let statusCode = (isChallenge || mode == .ordinaryCloudflareForbidden) ? 403 : 200
     let headers: [String: String]
     let body: String
@@ -300,7 +502,37 @@ nonisolated private final class ChallengeURLProtocol: URLProtocol, @unchecked Se
       headers = ["Content-Type": "application/octet-stream"]
       body = "ok"
     }
-    guard let url = request.url,
+    let responseURL: URL?
+    if (mode == .redirectedChildChallenge
+          || (mode == .firstChallengeThenRedirectedChildChallenge && requestNumber > 1)),
+       let host = request.url?.host() {
+      responseURL = URL(string: "https://api.\(host)/challenge")
+    } else {
+      responseURL = request.url
+    }
+    sendResponse(
+      statusCode: statusCode,
+      headers: headers,
+      body: body,
+      responseURL: responseURL
+    )
+  }
+
+  override func stopLoading() {
+    Self.lock.lock()
+    if Self.pendingDelayedChallenge === self {
+      Self.pendingDelayedChallenge = nil
+    }
+    Self.lock.unlock()
+  }
+
+  private func sendResponse(
+    statusCode: Int,
+    headers: [String: String],
+    body: String,
+    responseURL: URL? = nil
+  ) {
+    guard let url = responseURL ?? request.url,
           let response = HTTPURLResponse(
             url: url,
             statusCode: statusCode,
@@ -315,6 +547,4 @@ nonisolated private final class ChallengeURLProtocol: URLProtocol, @unchecked Se
     client?.urlProtocol(self, didLoad: Data(body.utf8))
     client?.urlProtocolDidFinishLoading(self)
   }
-
-  override func stopLoading() {}
 }
