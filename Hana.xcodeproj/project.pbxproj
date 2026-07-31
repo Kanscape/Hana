@@ -38,6 +38,7 @@
 		F4A11D022FB900000C55FF9 /* HanaCompleteGridRowsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4A11D012FB900000C55FF9 /* HanaCompleteGridRowsTests.swift */; };
 		F4FAFE022FB900000C55FF9 /* HanimeFavoriteRepositoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4FAFE012FB900000C55FF9 /* HanimeFavoriteRepositoryTests.swift */; };
 		F4CFCF022FC0000000000002 /* HanaHTTPClientCloudflareTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4CFCF012FC0000000000001 /* HanaHTTPClientCloudflareTests.swift */; };
+		F4CFD0022FC1000000000002 /* SiteWebSessionSheetTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4CFD0012FC1000000000001 /* SiteWebSessionSheetTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -82,6 +83,7 @@
 		F4A11D012FB900000C55FF9 /* HanaCompleteGridRowsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HanaCompleteGridRowsTests.swift; sourceTree = "<group>"; };
 		F4FAFE012FB900000C55FF9 /* HanimeFavoriteRepositoryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HanimeFavoriteRepositoryTests.swift; sourceTree = "<group>"; };
 		F4CFCF012FC0000000000001 /* HanaHTTPClientCloudflareTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HanaHTTPClientCloudflareTests.swift; sourceTree = "<group>"; };
+		F4CFD0012FC1000000000001 /* SiteWebSessionSheetTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SiteWebSessionSheetTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -167,6 +169,7 @@
 				F4A100022FB8000000000002 /* HanimeHomeRepositoryTests.swift */,
 				F4FAFE012FB900000C55FF9 /* HanimeFavoriteRepositoryTests.swift */,
 				F4CFCF012FC0000000000001 /* HanaHTTPClientCloudflareTests.swift */,
+				F4CFD0012FC1000000000001 /* SiteWebSessionSheetTests.swift */,
 				F4A100032FB8000000000003 /* Fixtures */,
 			);
 			path = HanaTests;
@@ -350,6 +353,7 @@
 				F4A100082FB8000000000008 /* HanimeHomeRepositoryTests.swift in Sources */,
 				F4FAFE022FB900000C55FF9 /* HanimeFavoriteRepositoryTests.swift in Sources */,
 				F4CFCF022FC0000000000002 /* HanaHTTPClientCloudflareTests.swift in Sources */,
+				F4CFD0022FC1000000000002 /* SiteWebSessionSheetTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

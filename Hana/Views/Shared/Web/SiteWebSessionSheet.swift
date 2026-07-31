@@ -81,6 +81,12 @@ struct SiteWebView: UIViewRepresentable {
     }
 
     func updateUIView(_ webView: WKWebView, context: Context) {}
+
+    static func dismantleUIView(_ webView: WKWebView, coordinator: Coordinator) {
+        coordinator.cancelCloudflareCompletionChecks()
+        webView.navigationDelegate = nil
+        webView.stopLoading()
+    }
 }
 #elseif os(macOS)
 struct SiteWebView: NSViewRepresentable {
@@ -108,8 +114,35 @@ struct SiteWebView: NSViewRepresentable {
     }
 
     func updateNSView(_ webView: WKWebView, context: Context) {}
+
+    static func dismantleNSView(_ webView: WKWebView, coordinator: Coordinator) {
+        coordinator.cancelCloudflareCompletionChecks()
+        webView.navigationDelegate = nil
+        webView.stopLoading()
+    }
 }
 #endif
+
+struct CloudflareCompletionPollingState {
+    private(set) var isScheduled = false
+    private(set) var isFinished = false
+
+    mutating func schedule() -> Bool {
+        guard !isFinished, !isScheduled else { return false }
+        isScheduled = true
+        return true
+    }
+
+    mutating func beginCheck() {
+        guard !isFinished else { return }
+        isScheduled = false
+    }
+
+    mutating func finish() {
+        isScheduled = false
+        isFinished = true
+    }
+}
 
 extension SiteWebView {
     final class Coordinator: NSObject, WKNavigationDelegate {
@@ -117,9 +150,8 @@ extension SiteWebView {
         let onCookiesChanged: ([HTTPCookie]) -> Void
         let onFlowCompleted: ([HTTPCookie]) -> Void
         private var hasCompletedLogin = false
-        private var hasCompletedCloudflare = false
-        private var isCloudflareCheckScheduled = false
-        private var cloudflareCheckAttempts = 0
+        private var cloudflarePollingState = CloudflareCompletionPollingState()
+        private var cloudflareCheckWorkItem: DispatchWorkItem?
 
         init(
             flow: SiteWebFlow,
@@ -197,26 +229,35 @@ extension SiteWebView {
             }
         }
 
+        func cancelCloudflareCompletionChecks() {
+            cloudflareCheckWorkItem?.cancel()
+            cloudflareCheckWorkItem = nil
+            cloudflarePollingState.finish()
+        }
+
         private func scheduleCloudflareCompletionCheck(from webView: WKWebView) {
             guard flow.kind == .cloudflare,
-                  !hasCompletedCloudflare,
-                  !isCloudflareCheckScheduled,
-                  cloudflareCheckAttempts < 60 else {
+                  cloudflarePollingState.schedule() else {
                 return
             }
 
-            isCloudflareCheckScheduled = true
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self, weak webView] in
+            let workItem = DispatchWorkItem { [weak self, weak webView] in
                 guard let self, let webView else { return }
-                self.isCloudflareCheckScheduled = false
-                self.cloudflareCheckAttempts += 1
+                self.cloudflareCheckWorkItem = nil
+                self.cloudflarePollingState.beginCheck()
                 self.completeCloudflareIfReady(from: webView)
             }
+            cloudflareCheckWorkItem = workItem
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: workItem)
         }
 
         private func completeCloudflareIfReady(from webView: WKWebView) {
             webView.evaluateJavaScript("document.head ? document.head.innerHTML : ''") { [weak self, weak webView] result, _ in
-                guard let self, let webView, !self.hasCompletedCloudflare else { return }
+                guard let self,
+                      let webView,
+                      !self.cloudflarePollingState.isFinished else {
+                    return
+                }
                 let html = result as? String ?? ""
                 guard !self.containsCloudflareChallengeMarker(html) else {
                     self.scheduleCloudflareCompletionCheck(from: webView)
@@ -224,7 +265,11 @@ extension SiteWebView {
                 }
 
                 webView.configuration.websiteDataStore.httpCookieStore.getAllCookies { [weak self, weak webView] cookies in
-                    guard let self, let webView, !self.hasCompletedCloudflare else { return }
+                    guard let self,
+                          let webView,
+                          !self.cloudflarePollingState.isFinished else {
+                        return
+                    }
                     guard SiteWebCookieScope.cloudflareClearance(
                         in: cookies,
                         for: self.flow.url
@@ -233,7 +278,7 @@ extension SiteWebView {
                         return
                     }
 
-                    self.hasCompletedCloudflare = true
+                    self.cloudflarePollingState.finish()
                     self.onCookiesChanged(cookies)
                     self.onFlowCompleted(cookies)
                 }
