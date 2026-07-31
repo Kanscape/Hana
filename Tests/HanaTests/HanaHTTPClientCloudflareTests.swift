@@ -152,6 +152,29 @@ struct HanaHTTPClientCloudflareTests {
     #expect(ChallengeURLProtocol.capturedRequests.count == 1)
   }
 
+  @Test("deferred recovery returns the challenge without awaiting the resolver")
+  func deferredRecoveryReturnsChallenge() async throws {
+    let harness = try Harness(mode: .alwaysChallenge)
+    defer { harness.cleanup() }
+
+    do {
+      _ = try await harness.client.data(
+        from: harness.baseURL,
+        automaticallyResolvesCloudflareChallenges: false
+      )
+      Issue.record("The deferred challenge unexpectedly succeeded")
+    } catch let error as HanaNetworkError {
+      guard case .cloudflareChallenge(let url) = error else {
+        Issue.record("Unexpected network error: \(error.localizedDescription)")
+        return
+      }
+      #expect(url == harness.baseURL)
+    }
+
+    #expect(harness.resolver.callCount == 0)
+    #expect(ChallengeURLProtocol.capturedRequests.count == 1)
+  }
+
   @Test("a child-host challenge does not use the base-host resolver")
   func childHostChallengeDoesNotResolve() async throws {
     let harness = try Harness(mode: .alwaysChallenge)
