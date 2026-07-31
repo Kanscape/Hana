@@ -274,7 +274,8 @@ struct ContentView: View {
             let user = try await services.repository.currentUser()
             await services.applyLoginState(user: user)
         } catch {
-            if services.siteSession.handle(error) {
+            if services.siteSession.handle(error)
+                || services.siteSession.shouldPreserveLoginState(after: error) {
                 return
             }
             await services.applyLoginState(user: nil)

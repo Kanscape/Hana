@@ -231,6 +231,22 @@ final class SiteWebSession: HanaCloudflareChallengeResolving {
         return false
     }
 
+    func shouldPreserveLoginState(after error: Error) -> Bool {
+        if error is CancellationError
+            || (error as? URLError)?.code == .cancelled {
+            return true
+        }
+        guard let networkError = error as? HanaNetworkError else { return false }
+        switch networkError {
+        case .cloudflareChallenge,
+             .cloudflareVerificationCancelled,
+             .cloudflareVerificationFailed:
+            return true
+        default:
+            return false
+        }
+    }
+
     func requestLogin() {
         guard activeFlow == nil,
               !isCloudflareVerificationPreparing,

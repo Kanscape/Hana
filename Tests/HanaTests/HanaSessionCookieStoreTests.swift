@@ -779,6 +779,24 @@ struct HanaSessionCookieStoreTests {
     #expect(!session.isCloudflareVerificationInProgress)
   }
 
+  @Test("verification and task cancellation preserve existing login state")
+  func transientVerificationErrorsPreserveLoginState() throws {
+    let context = try TestContext()
+    defer { context.cleanup() }
+    let store = HanaSessionCookieStore(
+      credentialStore: TestCredentialStore(),
+      defaults: context.defaults
+    )
+    let url = try #require(URL(string: "https://preserve-login.invalid"))
+    let session = SiteWebSession(baseURL: url, defaults: context.defaults, cookieStore: store)
+
+    #expect(session.shouldPreserveLoginState(after: HanaNetworkError.cloudflareVerificationCancelled))
+    #expect(session.shouldPreserveLoginState(after: HanaNetworkError.cloudflareVerificationFailed))
+    #expect(session.shouldPreserveLoginState(after: CancellationError()))
+    #expect(!session.shouldPreserveLoginState(after: HanaNetworkError.authenticationFailed))
+    #expect(!session.shouldPreserveLoginState(after: HanaNetworkError.httpStatus(401, url)))
+  }
+
   @Test("Cloudflare completion requires a fresh scoped clearance")
   func cloudflareCompletionGateAndStatus() async throws {
     let context = try TestContext()
