@@ -94,6 +94,28 @@ struct HanaHTTPClientCloudflareTests {
     #expect(ChallengeURLProtocol.capturedRequests.count == 2)
   }
 
+  @Test("an ordinary Cloudflare 403 does not start verification")
+  func ordinaryCloudflareForbiddenDoesNotResolve() async throws {
+    let harness = try Harness(mode: .ordinaryCloudflareForbidden)
+    defer { harness.cleanup() }
+    let url = harness.baseURL.appending(path: "forbidden")
+
+    do {
+      _ = try await harness.client.data(from: url)
+      Issue.record("The ordinary 403 unexpectedly succeeded")
+    } catch let error as HanaNetworkError {
+      guard case .httpStatus(let statusCode, let responseURL) = error else {
+        Issue.record("Unexpected network error: \(error.localizedDescription)")
+        return
+      }
+      #expect(statusCode == 403)
+      #expect(responseURL == url)
+    }
+
+    #expect(harness.resolver.callCount == 0)
+    #expect(ChallengeURLProtocol.capturedRequests.count == 1)
+  }
+
   @Test("cancelling verification does not retry")
   func cancelledVerificationDoesNotRetry() async throws {
     let harness = try Harness(mode: .alwaysChallenge, verificationResult: false)
@@ -210,6 +232,7 @@ nonisolated private final class ChallengeURLProtocol: URLProtocol, @unchecked Se
   enum Mode: Sendable {
     case firstChallengeThenSuccess
     case alwaysChallenge
+    case ordinaryCloudflareForbidden
   }
 
   struct CapturedRequest: Sendable {
@@ -262,11 +285,21 @@ nonisolated private final class ChallengeURLProtocol: URLProtocol, @unchecked Se
     let mode = Self.mode
     Self.lock.unlock()
 
-    let isChallenge = mode == .alwaysChallenge || requestNumber == 1
-    let statusCode = isChallenge ? 403 : 200
-    let headers = isChallenge
-      ? ["Content-Type": "text/html", "cf-mitigated": "challenge", "Server": "cloudflare"]
-      : ["Content-Type": "application/octet-stream"]
+    let isChallenge = mode == .alwaysChallenge
+      || (mode == .firstChallengeThenSuccess && requestNumber == 1)
+    let statusCode = (isChallenge || mode == .ordinaryCloudflareForbidden) ? 403 : 200
+    let headers: [String: String]
+    let body: String
+    if isChallenge {
+      headers = ["Content-Type": "text/html", "cf-mitigated": "challenge", "Server": "cloudflare"]
+      body = "challenge"
+    } else if mode == .ordinaryCloudflareForbidden {
+      headers = ["Content-Type": "text/html", "Server": "cloudflare"]
+      body = "forbidden"
+    } else {
+      headers = ["Content-Type": "application/octet-stream"]
+      body = "ok"
+    }
     guard let url = request.url,
           let response = HTTPURLResponse(
             url: url,
@@ -279,7 +312,7 @@ nonisolated private final class ChallengeURLProtocol: URLProtocol, @unchecked Se
     }
 
     client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-    client?.urlProtocol(self, didLoad: Data(isChallenge ? "challenge".utf8 : "ok".utf8))
+    client?.urlProtocol(self, didLoad: Data(body.utf8))
     client?.urlProtocolDidFinishLoading(self)
   }
 

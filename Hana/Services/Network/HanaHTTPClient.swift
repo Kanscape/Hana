@@ -318,12 +318,8 @@ final class HanaHTTPClient {
     }
 
     private func isCloudflareChallenge(_ response: HTTPURLResponse) -> Bool {
-        guard response.statusCode == 403 else { return false }
-        if response.value(forHTTPHeaderField: "cf-mitigated") == "challenge" {
-            return true
-        }
-        return response.value(forHTTPHeaderField: "server")?
-            .localizedCaseInsensitiveContains("cloudflare") == true
+        response.statusCode == 403
+            && response.value(forHTTPHeaderField: "cf-mitigated") == "challenge"
     }
 
     private func formBody(from fields: [String: String?]) -> Data? {
