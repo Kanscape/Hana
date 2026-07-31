@@ -1062,6 +1062,7 @@ private struct NetworkSettingsScreen: View {
     @State private var alertMessage: HanaAlertMessage?
     @State private var latencyResults: [SiteLatencyResult] = []
     @State private var isTestingLatency = false
+    @State private var isApplyingNetworkSettings = false
     @State private var isCredentialLoginPresented = false
 
     var body: some View {
@@ -1082,6 +1083,18 @@ private struct NetworkSettingsScreen: View {
                         Text(date.hanaChineseDateTimeText)
                     } label: {
                         Label("同步时间", systemImage: "clock.arrow.circlepath")
+                    }
+                }
+                LabeledContent {
+                    Text(services.siteSession.cloudflareStatusText)
+                } label: {
+                    Label("Cloudflare", systemImage: "shield.lefthalf.filled")
+                }
+                if let date = services.siteSession.lastCloudflareVerifiedAt {
+                    LabeledContent {
+                        Text(date.hanaChineseDateTimeText)
+                    } label: {
+                        Label("验证时间", systemImage: "checkmark.shield")
                     }
                 }
             }
@@ -1127,10 +1140,15 @@ private struct NetworkSettingsScreen: View {
                 }
 
                 Button {
-                    applyNetworkSettings()
+                    Task { await applyNetworkSettings() }
                 } label: {
-                    Label("应用网络设置", systemImage: "network")
+                    if isApplyingNetworkSettings {
+                        Label("应用中", systemImage: "hourglass")
+                    } else {
+                        Label("应用网络设置", systemImage: "network")
+                    }
                 }
+                .disabled(isApplyingNetworkSettings)
             }
 
             Section("站点测速") {
@@ -1184,11 +1202,6 @@ private struct NetworkSettingsScreen: View {
                 } label: {
                     Label("账号密码登录", systemImage: "key")
                 }
-                Button {
-                    services.siteSession.requestCloudflareVerification()
-                } label: {
-                    Label("站点验证", systemImage: "shield")
-                }
                 Button(role: .destructive) {
                     Task { await services.logout() }
                 } label: {
@@ -1221,7 +1234,7 @@ private struct NetworkSettingsScreen: View {
         HanaNetworkProxyMode(rawValue: proxyMode) ?? .system
     }
 
-    private func applyNetworkSettings() {
+    private func applyNetworkSettings() async {
         guard !services.downloadClient.hasActiveDownloads else {
             alertMessage = .error("有下载进行中，完成或取消后再应用网络设置")
             return
@@ -1230,6 +1243,10 @@ private struct NetworkSettingsScreen: View {
             alertMessage = .error("代理端口无效")
             return
         }
+
+        isApplyingNetworkSettings = true
+        defer { isApplyingNetworkSettings = false }
+        await services.siteSession.invalidateCloudflareVerification()
         reloadServices(services.httpClient.baseURL)
         toastMessage = .success("网络设置已应用")
     }

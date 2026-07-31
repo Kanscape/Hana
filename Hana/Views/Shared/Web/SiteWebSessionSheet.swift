@@ -17,23 +17,37 @@ struct SiteWebSessionSheet: View {
 
     private var content: some View {
         NavigationStack {
-            SiteWebView(
-                flow: flow,
-                onCookiesChanged: { cookies in
-                    self.cookies = cookies
-                },
-                onFlowCompleted: { cookies in
-                    onComplete(cookies)
+            VStack(spacing: 0) {
+                if flow.kind == .cloudflare {
+                    Text("请完成 Cloudflare 验证，并等待页面自动关闭。")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal)
+                        .padding(.vertical, 10)
+                        .background(.bar)
                 }
-            )
+
+                SiteWebView(
+                    flow: flow,
+                    onCookiesChanged: { cookies in
+                        self.cookies = cookies
+                    },
+                    onFlowCompleted: { cookies in
+                        onComplete(cookies)
+                    }
+                )
+            }
             .navigationTitle(flow.title)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     HanaToolbarIconButton(title: "取消", systemImage: "xmark", action: onCancel)
                 }
-                ToolbarItem(placement: .confirmationAction) {
-                    HanaToolbarIconButton(title: "完成", systemImage: "checkmark") {
-                        onComplete(cookies)
+                if flow.kind == .login {
+                    ToolbarItem(placement: .confirmationAction) {
+                        HanaToolbarIconButton(title: "完成", systemImage: "checkmark") {
+                            onComplete(cookies)
+                        }
                     }
                 }
             }
@@ -58,6 +72,7 @@ struct SiteWebView: UIViewRepresentable {
     func makeUIView(context: Context) -> WKWebView {
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .default()
+        configuration.defaultWebpagePreferences.allowsContentJavaScript = true
         let webView = WKWebView(frame: .zero, configuration: configuration)
         webView.customUserAgent = HanaHTTPClient.userAgent
         webView.navigationDelegate = context.coordinator
@@ -84,6 +99,7 @@ struct SiteWebView: NSViewRepresentable {
     func makeNSView(context: Context) -> WKWebView {
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .default()
+        configuration.defaultWebpagePreferences.allowsContentJavaScript = true
         let webView = WKWebView(frame: .zero, configuration: configuration)
         webView.customUserAgent = HanaHTTPClient.userAgent
         webView.navigationDelegate = context.coordinator
@@ -209,7 +225,10 @@ extension SiteWebView {
 
                 webView.configuration.websiteDataStore.httpCookieStore.getAllCookies { [weak self, weak webView] cookies in
                     guard let self, let webView, !self.hasCompletedCloudflare else { return }
-                    guard self.cookiesForFlowHost(cookies).contains(where: { $0.name == "cf_clearance" }) else {
+                    guard SiteWebCookieScope.cloudflareClearance(
+                        in: cookies,
+                        for: self.flow.url
+                    ) != nil else {
                         self.scheduleCloudflareCompletionCheck(from: webView)
                         return
                     }
@@ -230,14 +249,6 @@ extension SiteWebView {
                 "#challenge-error-text",
                 "challenge-error-text"
             ].contains { html.localizedCaseInsensitiveContains($0) }
-        }
-
-        private func cookiesForFlowHost(_ cookies: [HTTPCookie]) -> [HTTPCookie] {
-            guard let host = flow.url.host() else { return cookies }
-            return cookies.filter { cookie in
-                let domain = cookie.domain.trimmingCharacters(in: CharacterSet(charactersIn: "."))
-                return domain == host || domain.contains(host) || host.contains(domain)
-            }
         }
 
         private func isLoginURL(_ url: URL) -> Bool {

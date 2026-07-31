@@ -283,6 +283,204 @@ struct HanaSessionCookieStoreTests {
     }
   }
 
+  @Test("Cloudflare cookie matching rejects expired and lookalike domains")
+  func cloudflareCookieScope() throws {
+    let url = try #require(URL(string: "https://example.invalid/path"))
+    let valid = try makeCookie(
+      domain: ".example.invalid",
+      name: SiteWebCookieScope.cloudflareClearanceName,
+      expires: Date(timeIntervalSinceNow: 60)
+    )
+    let expired = try makeCookie(
+      domain: "example.invalid",
+      name: SiteWebCookieScope.cloudflareClearanceName,
+      expires: Date(timeIntervalSinceNow: -60)
+    )
+    let lookalike = try makeCookie(
+      domain: "evil-example.invalid",
+      name: SiteWebCookieScope.cloudflareClearanceName,
+      expires: Date(timeIntervalSinceNow: 60)
+    )
+    let childDomain = try makeCookie(
+      domain: "child.example.invalid",
+      name: SiteWebCookieScope.cloudflareClearanceName,
+      expires: Date(timeIntervalSinceNow: 60)
+    )
+
+    #expect(SiteWebCookieScope.matches(valid, url: url))
+    #expect(!SiteWebCookieScope.matches(lookalike, url: url))
+    #expect(!SiteWebCookieScope.matches(childDomain, url: url))
+    #expect(SiteWebCookieScope.cloudflareClearance(in: [expired], for: url) == nil)
+    #expect(SiteWebCookieScope.cloudflareClearance(in: [lookalike], for: url) == nil)
+    #expect(SiteWebCookieScope.cloudflareClearance(in: [valid], for: url) === valid)
+  }
+
+  @Test("Cloudflare verification fans concurrent requests into one flow")
+  func cloudflareWaiterFanIn() async throws {
+    let context = try TestContext()
+    defer { context.cleanup() }
+    let store = HanaSessionCookieStore(
+      credentialStore: TestCredentialStore(),
+      defaults: context.defaults
+    )
+    let url = try #require(URL(string: "https://fan-in.invalid/path"))
+    let session = SiteWebSession(baseURL: url, defaults: context.defaults, cookieStore: store)
+
+    let first = Task { @MainActor in await session.resolveCloudflareChallenge(at: url) }
+    let second = Task { @MainActor in await session.resolveCloudflareChallenge(at: url) }
+    for _ in 0..<200 where session.activeFlow == nil {
+      try await Task.sleep(for: .milliseconds(10))
+    }
+
+    guard session.activeFlow?.kind == .cloudflare else {
+      session.cancel()
+      _ = await (first.value, second.value)
+      Issue.record("The shared Cloudflare flow was not presented")
+      return
+    }
+    #expect(session.cloudflareStatusText == "验证中")
+    let clearance = try makeCookie(
+      domain: "fan-in.invalid",
+      name: SiteWebCookieScope.cloudflareClearanceName,
+      expires: Date(timeIntervalSinceNow: 60)
+    )
+    #expect(session.complete(with: [clearance]))
+    #expect(await first.value)
+    #expect(await second.value)
+    #expect(session.activeFlow == nil)
+    #expect(session.cloudflareStatusText == "已验证")
+    #expect(session.lastCloudflareVerifiedAt != nil)
+    #expect(session.lastCookieSyncAt == nil)
+
+    HTTPCookieStorage.shared.deleteCookie(clearance)
+  }
+
+  @Test("cancelling Cloudflare verification releases every waiter")
+  func cloudflareWaiterCancellation() async throws {
+    let context = try TestContext()
+    defer { context.cleanup() }
+    let store = HanaSessionCookieStore(
+      credentialStore: TestCredentialStore(),
+      defaults: context.defaults
+    )
+    let url = try #require(URL(string: "https://cancel-flow.invalid/path"))
+    let session = SiteWebSession(baseURL: url, defaults: context.defaults, cookieStore: store)
+
+    let first = Task { @MainActor in await session.resolveCloudflareChallenge(at: url) }
+    let second = Task { @MainActor in await session.resolveCloudflareChallenge(at: url) }
+    for _ in 0..<200 where session.activeFlow == nil {
+      try await Task.sleep(for: .milliseconds(10))
+    }
+    session.cancel()
+
+    #expect(!(await first.value))
+    #expect(!(await second.value))
+    #expect(session.activeFlow == nil)
+    #expect(!session.isCloudflareVerificationInProgress)
+    #expect(session.cloudflareStatusText == "需要验证")
+  }
+
+  @Test("Cloudflare completion requires a fresh scoped clearance")
+  func cloudflareCompletionGateAndStatus() async throws {
+    let context = try TestContext()
+    defer { context.cleanup() }
+    let store = HanaSessionCookieStore(
+      credentialStore: TestCredentialStore(),
+      defaults: context.defaults
+    )
+    let url = try #require(URL(string: "https://completion.invalid/path"))
+    var currentTime = Date(timeIntervalSince1970: 10_000)
+    let session = SiteWebSession(
+      baseURL: url,
+      defaults: context.defaults,
+      cookieStore: store,
+      now: { currentTime }
+    )
+    #expect(session.cloudflareStatusText == "无需验证")
+    session.cloudflareVerificationDidFail()
+    #expect(session.cloudflareStatusText == "需要验证")
+    await session.requestCloudflareVerification(url)
+    #expect(session.cloudflareStatusText == "验证中")
+
+    let expired = try makeCookie(
+      domain: "completion.invalid",
+      name: SiteWebCookieScope.cloudflareClearanceName,
+      expires: currentTime.addingTimeInterval(-1)
+    )
+    let lookalike = try makeCookie(
+      domain: "evil-completion.invalid",
+      name: SiteWebCookieScope.cloudflareClearanceName,
+      expires: currentTime.addingTimeInterval(60)
+    )
+    #expect(!session.complete(with: [expired]))
+    #expect(!session.complete(with: [lookalike]))
+    #expect(session.activeFlow?.kind == .cloudflare)
+
+    let valid = try makeCookie(
+      domain: "completion.invalid",
+      name: SiteWebCookieScope.cloudflareClearanceName,
+      expires: currentTime.addingTimeInterval(60)
+    )
+    #expect(session.complete(with: [valid]))
+    #expect(session.cloudflareStatusText == "已验证")
+    currentTime = currentTime.addingTimeInterval(61)
+    #expect(session.cloudflareStatusText == "已过期")
+
+    HTTPCookieStorage.shared.deleteCookie(valid)
+  }
+
+  @Test("invalidating Cloudflare preserves sessions and unrelated hosts")
+  func cloudflareInvalidationIsScoped() async throws {
+    let context = try TestContext()
+    defer { context.cleanup() }
+    let store = HanaSessionCookieStore(
+      credentialStore: TestCredentialStore(),
+      defaults: context.defaults
+    )
+    let url = try #require(URL(string: "https://scope.invalid"))
+    let session = SiteWebSession(baseURL: url, defaults: context.defaults, cookieStore: store)
+    let sessionCookie = try makeCookie(domain: "scope.invalid", name: "session")
+    let clearance = try makeCookie(
+      domain: ".scope.invalid",
+      name: SiteWebCookieScope.cloudflareClearanceName
+    )
+    let unrelated = try makeCookie(
+      domain: "unrelated.invalid",
+      name: SiteWebCookieScope.cloudflareClearanceName
+    )
+    let webCookieStore = WKWebsiteDataStore.default().httpCookieStore
+    for cookie in [sessionCookie, clearance, unrelated] {
+      HTTPCookieStorage.shared.setCookie(cookie)
+      await set(cookie, in: webCookieStore)
+    }
+    session.sync(cookies: [sessionCookie, clearance])
+
+    await session.invalidateCloudflareVerification()
+
+    let persistedHeader = try #require(store.cookieHeader(for: url))
+    let webCookies = await allCookies(in: webCookieStore)
+    #expect(persistedHeader == "session=value")
+    #expect(HTTPCookieStorage.shared.cookies(for: url)?.contains { $0.name == "session" } == true)
+    #expect(HTTPCookieStorage.shared.cookies(for: url)?.contains {
+      $0.name == SiteWebCookieScope.cloudflareClearanceName
+    } != true)
+    let unrelatedURL = try #require(URL(string: "https://unrelated.invalid"))
+    #expect(HTTPCookieStorage.shared.cookies(for: unrelatedURL)?.contains {
+      $0.name == SiteWebCookieScope.cloudflareClearanceName
+    } == true)
+    #expect(!webCookies.contains {
+      $0.name == SiteWebCookieScope.cloudflareClearanceName
+        && SiteWebCookieScope.matches($0, url: url)
+    })
+    #expect(webCookies.contains { $0.name == "session" && SiteWebCookieScope.matches($0, url: url) })
+    #expect(webCookies.contains { $0.name == SiteWebCookieScope.cloudflareClearanceName && $0.domain == "unrelated.invalid" })
+
+    for cookie in [sessionCookie, clearance, unrelated] {
+      HTTPCookieStorage.shared.deleteCookie(cookie)
+      await remove(cookie, from: webCookieStore)
+    }
+  }
+
   @Test("privacy manifest declares the audited UserDefaults reason")
   func privacyManifest() throws {
     let appBundle = try #require(
@@ -304,6 +502,24 @@ struct HanaSessionCookieStoreTests {
     #expect(reasons == ["CA92.1"])
     #expect(manifest["NSPrivacyTracking"] as? Bool == false)
     #expect((manifest["NSPrivacyCollectedDataTypes"] as? [Any])?.isEmpty == true)
+  }
+
+  private func makeCookie(
+    domain: String,
+    name: String,
+    expires: Date? = nil
+  ) throws -> HTTPCookie {
+    var properties: [HTTPCookiePropertyKey: Any] = [
+      .domain: domain,
+      .path: "/",
+      .name: name,
+      .value: "value",
+      .secure: "TRUE",
+    ]
+    if let expires {
+      properties[.expires] = expires
+    }
+    return try #require(HTTPCookie(properties: properties))
   }
 
   private func set(_ cookie: HTTPCookie, in store: WKHTTPCookieStore) async {

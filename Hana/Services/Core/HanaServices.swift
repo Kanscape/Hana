@@ -22,12 +22,17 @@ final class HanaServices {
 
     init(baseURL: URL = HanaServices.configuredBaseURL()) {
         let sessionCookieStore = HanaSessionCookieStore()
-        let httpClient = HanaHTTPClient(baseURL: baseURL, sessionCookieStore: sessionCookieStore)
+        let siteSession = SiteWebSession(baseURL: baseURL, cookieStore: sessionCookieStore)
+        let httpClient = HanaHTTPClient(
+            baseURL: baseURL,
+            sessionCookieStore: sessionCookieStore,
+            cloudflareChallengeResolver: siteSession
+        )
         let imagePipeline = HanaImagePipeline.make()
         let parser = HanimeHTMLParser(baseURL: baseURL)
         self.httpClient = httpClient
         self.imagePipeline = imagePipeline
-        self.siteSession = SiteWebSession(baseURL: baseURL, cookieStore: sessionCookieStore)
+        self.siteSession = siteSession
         self.repository = HanimeRepository(httpClient: httpClient, parser: parser)
         self.downloadClient = HanimeDownloadClient(httpClient: httpClient)
         self.networkMonitor = HanaNetworkMonitor()

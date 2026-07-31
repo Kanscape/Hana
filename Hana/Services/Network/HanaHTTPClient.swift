@@ -1,11 +1,19 @@
 import Foundation
 
+@MainActor
+protocol HanaCloudflareChallengeResolving: AnyObject {
+    func resolveCloudflareChallenge(at url: URL) async -> Bool
+    func cloudflareVerificationDidFail()
+}
+
 enum HanaNetworkError: LocalizedError {
     case invalidURL
     case invalidResponse
     case authenticationFailed
     case httpStatus(Int, URL?)
     case cloudflareChallenge(URL)
+    case cloudflareVerificationCancelled
+    case cloudflareVerificationFailed
     case invalidTextEncoding
 
     var errorDescription: String? {
@@ -20,6 +28,10 @@ enum HanaNetworkError: LocalizedError {
             "HTTP \(statusCode)"
         case .cloudflareChallenge:
             "需要 Cloudflare 验证"
+        case .cloudflareVerificationCancelled:
+            "已取消站点验证"
+        case .cloudflareVerificationFailed:
+            "站点验证未生效，请重试或更换网络"
         case .invalidTextEncoding:
             "页面编码解析失败"
         }
@@ -33,14 +45,17 @@ final class HanaHTTPClient {
 
     private let session: URLSession
     private let sessionCookieStore: HanaSessionCookieStore
+    private weak var cloudflareChallengeResolver: (any HanaCloudflareChallengeResolving)?
 
     init(
         baseURL: URL,
         sessionCookieStore: HanaSessionCookieStore,
+        cloudflareChallengeResolver: (any HanaCloudflareChallengeResolving)? = nil,
         session: URLSession? = nil
     ) {
         self.baseURL = baseURL
         self.sessionCookieStore = sessionCookieStore
+        self.cloudflareChallengeResolver = cloudflareChallengeResolver
         if let session {
             self.session = session
         } else {
@@ -90,14 +105,7 @@ final class HanaHTTPClient {
             request.setValue(value, forHTTPHeaderField: key)
         }
 
-        let (data, response) = try await session.data(for: request)
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw HanaNetworkError.invalidResponse
-        }
-
-        if isCloudflareChallenge(httpResponse) {
-            throw HanaNetworkError.cloudflareChallenge(url)
-        }
+        let (data, httpResponse) = try await responseData(for: request)
 
         guard (200..<300).contains(httpResponse.statusCode) else {
             throw HanaNetworkError.httpStatus(httpResponse.statusCode, url)
@@ -127,14 +135,7 @@ final class HanaHTTPClient {
         }
         request.httpBody = formBody(from: fields)
 
-        let (data, response) = try await session.data(for: request)
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw HanaNetworkError.invalidResponse
-        }
-
-        if isCloudflareChallenge(httpResponse) {
-            throw HanaNetworkError.cloudflareChallenge(url)
-        }
+        let (data, httpResponse) = try await responseData(for: request)
 
         let isSuccess = (200..<300).contains(httpResponse.statusCode)
             || additionalSuccessStatusCodes.contains(httpResponse.statusCode)
@@ -165,14 +166,7 @@ final class HanaHTTPClient {
         }
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
-        let (data, response) = try await session.data(for: request)
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw HanaNetworkError.invalidResponse
-        }
-
-        if isCloudflareChallenge(httpResponse) {
-            throw HanaNetworkError.cloudflareChallenge(url)
-        }
+        let (data, httpResponse) = try await responseData(for: request)
 
         guard (200..<300).contains(httpResponse.statusCode) else {
             throw HanaNetworkError.httpStatus(httpResponse.statusCode, url)
@@ -278,6 +272,49 @@ final class HanaHTTPClient {
             return false
         }
         return requestHost == siteHost || requestHost.hasSuffix(".\(siteHost)")
+    }
+
+    private func responseData(for request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        let initial = try await execute(request)
+        guard isCloudflareChallenge(initial.response) else {
+            return initial
+        }
+        guard let url = request.url else {
+            throw HanaNetworkError.invalidURL
+        }
+        guard let cloudflareChallengeResolver else {
+            throw HanaNetworkError.cloudflareChallenge(url)
+        }
+
+        let didVerify = await cloudflareChallengeResolver.resolveCloudflareChallenge(at: url)
+        guard didVerify else {
+            if Task.isCancelled {
+                throw CancellationError()
+            }
+            throw HanaNetworkError.cloudflareVerificationCancelled
+        }
+
+        let retried = try await execute(requestRefreshingCookieHeader(request))
+        guard !isCloudflareChallenge(retried.response) else {
+            cloudflareChallengeResolver.cloudflareVerificationDidFail()
+            throw HanaNetworkError.cloudflareVerificationFailed
+        }
+        return retried
+    }
+
+    private func execute(_ request: URLRequest) async throws -> (data: Data, response: HTTPURLResponse) {
+        let (data, response) = try await session.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw HanaNetworkError.invalidResponse
+        }
+        return (data, httpResponse)
+    }
+
+    private func requestRefreshingCookieHeader(_ request: URLRequest) -> URLRequest {
+        guard let url = request.url else { return request }
+        var refreshed = request
+        refreshed.setValue(cookieHeader(for: url), forHTTPHeaderField: "Cookie")
+        return refreshed
     }
 
     private func isCloudflareChallenge(_ response: HTTPURLResponse) -> Bool {
