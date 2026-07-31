@@ -56,6 +56,38 @@ struct SiteWebSessionSheet: View {
     }
 }
 
+private struct SiteCloudflareFlowPresenter: ViewModifier {
+    @Environment(HanaServices.self) private var services
+
+    func body(content: Content) -> some View {
+        let flow = Binding<SiteWebFlow?>(
+            get: {
+                guard services.siteSession.activeFlow?.kind == .cloudflare else { return nil }
+                return services.siteSession.activeFlow
+            },
+            set: { _ in }
+        )
+
+        content.sheet(item: flow) { activeFlow in
+            SiteWebSessionSheet(
+                flow: activeFlow,
+                onComplete: { cookies in
+                    services.siteSession.complete(flowID: activeFlow.id, with: cookies)
+                },
+                onCancel: {
+                    services.siteSession.cancel(flowID: activeFlow.id)
+                }
+            )
+        }
+    }
+}
+
+extension View {
+    func siteCloudflareFlowPresenter() -> some View {
+        modifier(SiteCloudflareFlowPresenter())
+    }
+}
+
 #if os(iOS) || os(visionOS)
 struct SiteWebView: UIViewRepresentable {
     let flow: SiteWebFlow
