@@ -10,6 +10,7 @@ struct SiteWebSessionSheet: View {
 
     var body: some View {
         content
+            .interactiveDismissDisabled(flow.kind == .cloudflare)
 #if os(macOS)
             .frame(minWidth: 760, idealWidth: 900, minHeight: 560, idealHeight: 640)
 #endif

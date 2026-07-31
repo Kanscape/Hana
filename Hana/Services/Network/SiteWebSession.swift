@@ -47,6 +47,42 @@ enum SiteWebCookieScope {
     }
 }
 
+nonisolated private final class CloudflareWaiterCancellation: @unchecked Sendable {
+    private let lock = NSLock()
+    private var isRegistered = false
+    private var isFinished = false
+    private var isCancelled = false
+
+    func register() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !isFinished else { return false }
+        isRegistered = true
+        return !isCancelled
+    }
+
+    func cancel() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !isFinished else { return false }
+        isCancelled = true
+        return isRegistered
+    }
+
+    @discardableResult
+    func finish() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        isFinished = true
+        return !isCancelled
+    }
+}
+
+private struct CloudflareWaiter {
+    let continuation: CheckedContinuation<Bool, Never>
+    let cancellation: CloudflareWaiterCancellation
+}
+
 @Observable
 final class SiteWebSession: HanaCloudflareChallengeResolving {
     let baseURL: URL
@@ -66,8 +102,7 @@ final class SiteWebSession: HanaCloudflareChallengeResolving {
     private let cookieStore: HanaSessionCookieStore
     private let now: () -> Date
     private var cloudflarePreparationID: UUID?
-    private var cloudflareWaiters: [UUID: CheckedContinuation<Bool, Never>] = [:]
-    private var cancelledCloudflareWaiterIDs: Set<UUID> = []
+    private var cloudflareWaiters: [UUID: CloudflareWaiter] = [:]
 
     private static let legacyIsLoggedInKey = "Hana.SiteWebSession.isLoggedIn"
     private static let legacyUserIDKey = "Hana.SiteWebSession.userID"
@@ -204,11 +239,18 @@ final class SiteWebSession: HanaCloudflareChallengeResolving {
     func resolveCloudflareChallenge(at url: URL) async -> Bool {
         isCloudflareVerificationRequired = true
         let waiterID = UUID()
+        let cancellation = CloudflareWaiterCancellation()
         return await withTaskCancellationHandler {
             await withCheckedContinuation { continuation in
-                registerCloudflareWaiter(continuation, id: waiterID, url: url)
+                registerCloudflareWaiter(
+                    continuation,
+                    id: waiterID,
+                    url: url,
+                    cancellation: cancellation
+                )
             }
         } onCancel: {
+            guard cancellation.cancel() else { return }
             Task { @MainActor [weak self] in
                 self?.cancelCloudflareWaiter(id: waiterID)
             }
@@ -345,18 +387,24 @@ final class SiteWebSession: HanaCloudflareChallengeResolving {
     private func registerCloudflareWaiter(
         _ continuation: CheckedContinuation<Bool, Never>,
         id: UUID,
-        url: URL
+        url: URL,
+        cancellation: CloudflareWaiterCancellation
     ) {
-        if Task.isCancelled || cancelledCloudflareWaiterIDs.remove(id) != nil {
+        guard cancellation.register(), !Task.isCancelled else {
+            cancellation.finish()
             continuation.resume(returning: false)
             return
         }
         if activeFlow?.kind == .login {
+            cancellation.finish()
             continuation.resume(returning: false)
             return
         }
 
-        cloudflareWaiters[id] = continuation
+        cloudflareWaiters[id] = CloudflareWaiter(
+            continuation: continuation,
+            cancellation: cancellation
+        )
         if !isCloudflareVerificationInProgress {
             Task { @MainActor [weak self] in
                 guard let self, self.cloudflareWaiters[id] != nil else { return }
@@ -366,11 +414,9 @@ final class SiteWebSession: HanaCloudflareChallengeResolving {
     }
 
     private func cancelCloudflareWaiter(id: UUID) {
-        guard let continuation = cloudflareWaiters.removeValue(forKey: id) else {
-            cancelledCloudflareWaiterIDs.insert(id)
-            return
-        }
-        continuation.resume(returning: false)
+        guard let waiter = cloudflareWaiters.removeValue(forKey: id) else { return }
+        waiter.cancellation.finish()
+        waiter.continuation.resume(returning: false)
 
         guard cloudflareWaiters.isEmpty,
               isCloudflareVerificationPreparing || activeFlow?.kind == .cloudflare else {
@@ -380,13 +426,11 @@ final class SiteWebSession: HanaCloudflareChallengeResolving {
     }
 
     private func resumeCloudflareWaiters(with result: Bool) {
-        let waiters = cloudflareWaiters
+        let waiters = Array(cloudflareWaiters.values)
         cloudflareWaiters.removeAll()
-        for id in waiters.keys {
-            cancelledCloudflareWaiterIDs.remove(id)
-        }
-        for continuation in waiters.values {
-            continuation.resume(returning: result)
+        for waiter in waiters {
+            let wasNotCancelled = waiter.cancellation.finish()
+            waiter.continuation.resume(returning: result && wasNotCancelled)
         }
     }
 

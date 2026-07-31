@@ -449,10 +449,12 @@ struct HanaSessionCookieStoreTests {
     let url = try #require(URL(string: "https://immediate-cancel.invalid/path"))
     let session = SiteWebSession(baseURL: url, defaults: context.defaults, cookieStore: store)
 
-    let request = Task { @MainActor in await session.resolveCloudflareChallenge(at: url) }
-    request.cancel()
+    for _ in 0..<100 {
+      let request = Task { @MainActor in await session.resolveCloudflareChallenge(at: url) }
+      request.cancel()
+      #expect(!(await request.value))
+    }
 
-    #expect(!(await request.value))
     try await Task.sleep(for: .milliseconds(50))
     #expect(session.activeFlow == nil)
     #expect(!session.isCloudflareVerificationInProgress)
