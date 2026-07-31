@@ -380,6 +380,84 @@ struct HanaSessionCookieStoreTests {
     #expect(session.cloudflareStatusText == "需要验证")
   }
 
+  @Test("cancelling one Cloudflare waiter preserves the shared flow")
+  func partialCloudflareWaiterCancellation() async throws {
+    let context = try TestContext()
+    defer { context.cleanup() }
+    let store = HanaSessionCookieStore(
+      credentialStore: TestCredentialStore(),
+      defaults: context.defaults
+    )
+    let url = try #require(URL(string: "https://partial-cancel.invalid/path"))
+    let session = SiteWebSession(baseURL: url, defaults: context.defaults, cookieStore: store)
+
+    let first = Task { @MainActor in await session.resolveCloudflareChallenge(at: url) }
+    let second = Task { @MainActor in await session.resolveCloudflareChallenge(at: url) }
+    for _ in 0..<200 where session.activeFlow == nil {
+      try await Task.sleep(for: .milliseconds(10))
+    }
+
+    first.cancel()
+    #expect(!(await first.value))
+    #expect(session.activeFlow?.kind == .cloudflare)
+
+    let clearance = try makeCookie(
+      domain: "partial-cancel.invalid",
+      name: SiteWebCookieScope.cloudflareClearanceName,
+      expires: Date(timeIntervalSinceNow: 60)
+    )
+    #expect(session.complete(with: [clearance]))
+    #expect(await second.value)
+    #expect(session.activeFlow == nil)
+
+    HTTPCookieStorage.shared.deleteCookie(clearance)
+  }
+
+  @Test("cancelling the final Cloudflare waiter closes the automatic flow")
+  func finalCloudflareWaiterCancellation() async throws {
+    let context = try TestContext()
+    defer { context.cleanup() }
+    let store = HanaSessionCookieStore(
+      credentialStore: TestCredentialStore(),
+      defaults: context.defaults
+    )
+    let url = try #require(URL(string: "https://final-cancel.invalid/path"))
+    let session = SiteWebSession(baseURL: url, defaults: context.defaults, cookieStore: store)
+
+    let request = Task { @MainActor in await session.resolveCloudflareChallenge(at: url) }
+    for _ in 0..<200 where session.activeFlow == nil {
+      try await Task.sleep(for: .milliseconds(10))
+    }
+    #expect(session.activeFlow?.kind == .cloudflare)
+
+    request.cancel()
+
+    #expect(!(await request.value))
+    #expect(session.activeFlow == nil)
+    #expect(!session.isCloudflareVerificationInProgress)
+    #expect(session.cloudflareStatusText == "需要验证")
+  }
+
+  @Test("an immediately cancelled Cloudflare request never leaves a flow")
+  func immediateCloudflareWaiterCancellation() async throws {
+    let context = try TestContext()
+    defer { context.cleanup() }
+    let store = HanaSessionCookieStore(
+      credentialStore: TestCredentialStore(),
+      defaults: context.defaults
+    )
+    let url = try #require(URL(string: "https://immediate-cancel.invalid/path"))
+    let session = SiteWebSession(baseURL: url, defaults: context.defaults, cookieStore: store)
+
+    let request = Task { @MainActor in await session.resolveCloudflareChallenge(at: url) }
+    request.cancel()
+
+    #expect(!(await request.value))
+    try await Task.sleep(for: .milliseconds(50))
+    #expect(session.activeFlow == nil)
+    #expect(!session.isCloudflareVerificationInProgress)
+  }
+
   @Test("Cloudflare completion requires a fresh scoped clearance")
   func cloudflareCompletionGateAndStatus() async throws {
     let context = try TestContext()

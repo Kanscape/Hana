@@ -81,7 +81,10 @@ struct ContentView: View {
         @Bindable var updateChecker = services.updateChecker
 
         return rootContent
-            .sheet(item: $siteSession.activeFlow) { flow in
+            .sheet(
+                item: $siteSession.activeFlow,
+                onDismiss: { services.siteSession.cancel() }
+            ) { flow in
                 SiteWebSessionSheet(
                     flow: flow,
                     onComplete: { cookies in

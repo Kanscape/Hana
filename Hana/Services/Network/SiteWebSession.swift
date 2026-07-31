@@ -359,7 +359,8 @@ final class SiteWebSession: HanaCloudflareChallengeResolving {
         cloudflareWaiters[id] = continuation
         if !isCloudflareVerificationInProgress {
             Task { @MainActor [weak self] in
-                await self?.requestCloudflareVerification(url)
+                guard let self, self.cloudflareWaiters[id] != nil else { return }
+                await self.requestCloudflareVerification(url)
             }
         }
     }
@@ -370,6 +371,12 @@ final class SiteWebSession: HanaCloudflareChallengeResolving {
             return
         }
         continuation.resume(returning: false)
+
+        guard cloudflareWaiters.isEmpty,
+              isCloudflareVerificationPreparing || activeFlow?.kind == .cloudflare else {
+            return
+        }
+        cancel()
     }
 
     private func resumeCloudflareWaiters(with result: Bool) {
