@@ -294,6 +294,7 @@ struct VideoLibraryActionsView: View {
                 onApply: applyPlaylistChanges,
                 onCreate: createPlaylist
             )
+            .siteCloudflareFlowPresenter()
         }
         .alert(
             "操作失败",

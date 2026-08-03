@@ -8,9 +8,15 @@ enum SiteWebFlowKind: Hashable {
 }
 
 struct SiteWebFlow: Identifiable, Hashable {
-    var id: String { "\(kind)-\(url.absoluteString)" }
+    let id: UUID
     let kind: SiteWebFlowKind
     let url: URL
+
+    init(id: UUID = UUID(), kind: SiteWebFlowKind, url: URL) {
+        self.id = id
+        self.kind = kind
+        self.url = url
+    }
 
     var title: String {
         switch kind {
@@ -22,13 +28,78 @@ struct SiteWebFlow: Identifiable, Hashable {
     }
 }
 
+enum SiteWebCookieScope {
+    static let cloudflareClearanceName = "cf_clearance"
+
+    static func matches(_ cookie: HTTPCookie, url: URL) -> Bool {
+        guard let host = url.host()?.lowercased() else { return false }
+        let domain = cookie.domain
+            .trimmingCharacters(in: CharacterSet(charactersIn: "."))
+            .lowercased()
+        guard !domain.isEmpty else { return false }
+        return domain == host || host.hasSuffix(".\(domain)")
+    }
+
+    static func cloudflareClearance(
+        in cookies: [HTTPCookie],
+        for url: URL,
+        now: Date = .now
+    ) -> HTTPCookie? {
+        cookies.first { cookie in
+            cookie.name == cloudflareClearanceName
+                && matches(cookie, url: url)
+                && cookie.expiresDate.map { $0 > now } != false
+        }
+    }
+}
+
+nonisolated private final class CloudflareWaiterCancellation: @unchecked Sendable {
+    private let lock = NSLock()
+    private var isRegistered = false
+    private var isFinished = false
+    private var isCancelled = false
+
+    func register() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !isFinished else { return false }
+        isRegistered = true
+        return !isCancelled
+    }
+
+    func cancel() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !isFinished else { return false }
+        isCancelled = true
+        return isRegistered
+    }
+
+    @discardableResult
+    func finish() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        isFinished = true
+        return !isCancelled
+    }
+}
+
+private struct CloudflareWaiter {
+    let continuation: CheckedContinuation<Bool, Never>
+    let cancellation: CloudflareWaiterCancellation
+}
+
 @Observable
-final class SiteWebSession {
+final class SiteWebSession: HanaCloudflareChallengeResolving {
     let baseURL: URL
     var activeFlow: SiteWebFlow?
     var lastSyncedCookieCount = 0
     var lastCookieSyncAt: Date?
     var lastLoginOpenedAt: Date?
+    private(set) var lastCloudflareVerifiedAt: Date?
+    private(set) var cloudflareVerificationGeneration: UInt64 = 0
+    private(set) var isCloudflareVerificationPreparing = false
+    private(set) var isCloudflareVerificationRequired = false
     var isLoggedIn: Bool
     var userID: String?
     var username: String?
@@ -36,6 +107,14 @@ final class SiteWebSession {
 
     private let defaults: UserDefaults
     private let cookieStore: HanaSessionCookieStore
+    private let now: () -> Date
+    private let cloudflareWebInvalidator: (() async -> Void)?
+    private var cloudflarePreparationID: UUID?
+    private var isCloudflareInvalidationInProgress = false
+    private var cloudflareInvalidationWaiters: [CheckedContinuation<Void, Never>] = []
+    private var cookieStateGeneration: UInt64 = 0
+    private var cloudflareWaiters: [UUID: CloudflareWaiter] = [:]
+
     private static let legacyIsLoggedInKey = "Hana.SiteWebSession.isLoggedIn"
     private static let legacyUserIDKey = "Hana.SiteWebSession.userID"
     private static let legacyUsernameKey = "Hana.SiteWebSession.username"
@@ -61,6 +140,14 @@ final class SiteWebSession {
         Self.scopedKey("avatarURLString", suffix: keySuffix)
     }
 
+    private var cloudflareVerifiedAtKey: String {
+        Self.scopedKey("cloudflareVerifiedAt", suffix: keySuffix)
+    }
+
+    private var cloudflareExpiresAtKey: String {
+        Self.scopedKey("cloudflareExpiresAt", suffix: keySuffix)
+    }
+
     private var canReadLegacyKeys: Bool {
         baseURL.host() == URL(string: HanaSiteBaseURL.defaultValue)?.host()
     }
@@ -73,11 +160,28 @@ final class SiteWebSession {
         username ?? "已登录"
     }
 
+    var isCloudflareVerificationInProgress: Bool {
+        isCloudflareVerificationPreparing
+            || activeFlow?.kind == .cloudflare
+            || !cloudflareWaiters.isEmpty
+    }
+
+    var isCloudflareVerified: Bool {
+        guard hasCloudflareClearance else { return false }
+        return cloudflareClearanceExpiryDate.map { $0 > now() } != false
+    }
+
     var cloudflareStatusText: String {
-        guard let cookie = cloudflareClearanceCookie else {
-            return "未验证"
+        if isCloudflareVerificationInProgress {
+            return "验证中"
         }
-        if let expiresDate = cookie.expiresDate, expiresDate < .now {
+        if isCloudflareVerificationRequired {
+            return "需要验证"
+        }
+        guard hasCloudflareClearance else {
+            return "无需验证"
+        }
+        if cloudflareClearanceExpiryDate.map({ $0 <= now() }) == true {
             return "已过期"
         }
         return "已验证"
@@ -90,17 +194,22 @@ final class SiteWebSession {
     init(
         baseURL: URL,
         defaults: UserDefaults = .standard,
-        cookieStore: HanaSessionCookieStore
+        cookieStore: HanaSessionCookieStore,
+        now: @escaping () -> Date = Date.init,
+        cloudflareWebInvalidator: (() async -> Void)? = nil
     ) {
         self.baseURL = baseURL
         self.defaults = defaults
         self.cookieStore = cookieStore
+        self.now = now
+        self.cloudflareWebInvalidator = cloudflareWebInvalidator
         let legacyHost = baseURL.host() == URL(string: HanaSiteBaseURL.defaultValue)?.host()
         let keySuffix = Self.keySuffix(for: baseURL)
         let isLoggedInKey = Self.scopedKey("isLoggedIn", suffix: keySuffix)
         let userIDKey = Self.scopedKey("userID", suffix: keySuffix)
         let usernameKey = Self.scopedKey("username", suffix: keySuffix)
         let avatarURLStringKey = Self.scopedKey("avatarURLString", suffix: keySuffix)
+        let cloudflareVerifiedAtKey = Self.scopedKey("cloudflareVerifiedAt", suffix: keySuffix)
         self.isLoggedIn = defaults.object(forKey: isLoggedInKey) as? Bool
             ?? (legacyHost ? defaults.bool(forKey: Self.legacyIsLoggedInKey) : false)
         self.userID = defaults.string(forKey: userIDKey)
@@ -109,50 +218,191 @@ final class SiteWebSession {
             ?? (legacyHost ? defaults.string(forKey: Self.legacyUsernameKey) : nil)
         self.avatarURLString = defaults.string(forKey: avatarURLStringKey)
             ?? (legacyHost ? defaults.string(forKey: Self.legacyAvatarURLStringKey) : nil)
+        self.lastCloudflareVerifiedAt = defaults.object(forKey: cloudflareVerifiedAtKey) as? Date
         loadStoredCookieMetadata()
     }
 
     @discardableResult
     func handle(_ error: Error) -> Bool {
         if case HanaNetworkError.cloudflareChallenge(let url) = error {
-            requestCloudflareVerification(url)
+            Task { await requestCloudflareVerification(url) }
             return true
         }
         return false
     }
 
-    func requestLogin() {
-        activeFlow = SiteWebFlow(kind: .login, url: baseURL.appending(path: "login"))
-        lastLoginOpenedAt = .now
+    func shouldPreserveLoginState(after error: Error) -> Bool {
+        if error is CancellationError
+            || (error as? URLError)?.code == .cancelled {
+            return true
+        }
+        guard let networkError = error as? HanaNetworkError else { return false }
+        switch networkError {
+        case .cloudflareChallenge,
+             .cloudflareVerificationCancelled,
+             .cloudflareVerificationFailed:
+            return true
+        default:
+            return false
+        }
     }
 
-    func requestCloudflareVerification(_ url: URL? = nil) {
+    func requestLogin() {
+        guard activeFlow == nil,
+              !isCloudflareVerificationPreparing,
+              !isCloudflareInvalidationInProgress,
+              cloudflareWaiters.isEmpty else {
+            return
+        }
+        activeFlow = SiteWebFlow(kind: .login, url: baseURL.appending(path: "login"))
+        lastLoginOpenedAt = now()
+    }
+
+    func requestCloudflareVerification(_ url: URL? = nil) async {
+        guard activeFlow == nil, !isCloudflareVerificationPreparing else { return }
+
+        isCloudflareVerificationRequired = true
+        let preparationID = UUID()
+        cloudflarePreparationID = preparationID
+        isCloudflareVerificationPreparing = true
+        await performCloudflareInvalidation()
+
+        guard cloudflarePreparationID == preparationID else { return }
+        isCloudflareVerificationPreparing = false
         activeFlow = SiteWebFlow(kind: .cloudflare, url: url ?? baseURL)
     }
 
-    func complete(with cookies: [HTTPCookie]) {
-        sync(cookies: cookies)
-        activeFlow = nil
+    func resolveCloudflareChallenge(
+        at url: URL,
+        requestGeneration: UInt64
+    ) async -> Bool {
+        if requestGeneration < cloudflareVerificationGeneration,
+           isCloudflareVerified {
+            return true
+        }
+
+        isCloudflareVerificationRequired = true
+        let waiterID = UUID()
+        let cancellation = CloudflareWaiterCancellation()
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                registerCloudflareWaiter(
+                    continuation,
+                    id: waiterID,
+                    url: url,
+                    cancellation: cancellation
+                )
+            }
+        } onCancel: {
+            guard cancellation.cancel() else { return }
+            Task { @MainActor [weak self] in
+                self?.cancelCloudflareWaiter(id: waiterID)
+            }
+        }
     }
 
-    func sync(cookies: [HTTPCookie]) {
-        let storage = HTTPCookieStorage.shared
-        cookies.forEach { storage.setCookie($0) }
-        if let cookieHeader = cookieHeader(from: cookies) {
-            cookieStore.saveCookieHeader(cookieHeader, for: baseURL)
+    func resolveCloudflareChallenge(at url: URL) async -> Bool {
+        await resolveCloudflareChallenge(
+            at: url,
+            requestGeneration: cloudflareVerificationGeneration
+        )
+    }
+
+    @discardableResult
+    func complete(flowID: UUID, with cookies: [HTTPCookie]) -> Bool {
+        guard let flow = activeFlow, flow.id == flowID else { return false }
+        if flow.kind == .cloudflare {
+            guard let clearance = SiteWebCookieScope.cloudflareClearance(
+                in: cookies,
+                for: flow.url,
+                now: now()
+            ) else {
+                return false
+            }
+
+            let usesExactRequestRetry = !cloudflareWaiters.isEmpty
+            sync(
+                cookies: cookies,
+                broadcastsAccountCookieChange: !usesExactRequestRetry,
+                completesCloudflareFlow: true
+            )
+            let verifiedAt = now()
+            lastCloudflareVerifiedAt = verifiedAt
+            isCloudflareVerificationRequired = false
+            defaults.set(verifiedAt, forKey: cloudflareVerifiedAtKey)
+            if let expiresAt = clearance.expiresDate {
+                defaults.set(expiresAt, forKey: cloudflareExpiresAtKey)
+            } else {
+                defaults.removeObject(forKey: cloudflareExpiresAtKey)
+            }
+            cloudflareVerificationGeneration &+= 1
+            activeFlow = nil
+            cloudflarePreparationID = nil
+            resumeCloudflareWaiters(with: true)
+            return true
         }
-        lastSyncedCookieCount = cookies.count
-        lastCookieSyncAt = .now
+
+        sync(cookies: cookies)
+        activeFlow = nil
+        return true
+    }
+
+    func cloudflareVerificationDidFail() {
+        isCloudflareVerificationRequired = true
+    }
+
+    func sync(
+        cookies: [HTTPCookie],
+        broadcastsAccountCookieChange: Bool = true,
+        acceptsCloudflareClearance: Bool = true,
+        completesCloudflareFlow: Bool = false
+    ) {
+        cookieStateGeneration &+= 1
+        let cookiesToSync = acceptsCloudflareClearance
+            ? cookies
+            : cookies.filter { cookie in
+                cookie.name != SiteWebCookieScope.cloudflareClearanceName
+                    || !cookieMatchesCurrentHost(cookie)
+            }
+        let storage = HTTPCookieStorage.shared
+        cookiesToSync.forEach { storage.setCookie($0) }
+        let scopedCookies = cookiesToSync.filter(cookieMatchesCurrentHost)
+        if let cookieHeader = cookieHeader(
+            from: scopedCookies,
+            preservingStoredCloudflareClearance: !acceptsCloudflareClearance
+        ) {
+            cookieStore.saveCookieHeader(cookieHeader, for: baseURL)
+            if acceptsCloudflareClearance {
+                updateCloudflareExpiryMetadata(from: scopedCookies)
+            }
+        }
+        lastSyncedCookieCount = scopedCookies.count
+        let shouldBroadcast = broadcastsAccountCookieChange
+            && (completesCloudflareFlow
+                || (!isCloudflareVerificationInProgress && cloudflareWaiters.isEmpty))
+        if shouldBroadcast {
+            lastCookieSyncAt = now()
+        }
     }
 
     func syncDefaultWebCookies() async {
-        let cookies = await defaultWebCookies()
-        sync(cookies: cookies)
+        await syncDefaultWebCookies { [self] in
+            await defaultWebCookies()
+        }
+    }
+
+    func syncDefaultWebCookies(
+        loading loadCookies: () async -> [HTTPCookie]
+    ) async {
+        let startingGeneration = cookieStateGeneration
+        let cookies = await loadCookies()
+        guard startingGeneration == cookieStateGeneration else { return }
+        sync(cookies: cookies, acceptsCloudflareClearance: false)
     }
 
     func syncSharedHTTPCookies() {
         let cookies = HTTPCookieStorage.shared.cookies(for: baseURL) ?? []
-        sync(cookies: cookies)
+        sync(cookies: cookies, acceptsCloudflareClearance: false)
     }
 
     func updateLoginState(user: HanimeUserProfile?) {
@@ -179,7 +429,10 @@ final class SiteWebSession {
     }
 
     func logout() async {
+        cancel()
+        cookieStateGeneration &+= 1
         isLoggedIn = false
+        isCloudflareVerificationRequired = false
         userID = nil
         username = nil
         avatarURLString = nil
@@ -188,23 +441,129 @@ final class SiteWebSession {
         defaults.removeObject(forKey: userIDKey)
         defaults.removeObject(forKey: usernameKey)
         defaults.removeObject(forKey: avatarURLStringKey)
+        clearCloudflareMetadata()
         removeCookiesForCurrentHost()
         await removeDefaultWebCookiesForCurrentHost()
     }
 
+    func invalidateCloudflareVerification() async {
+        cancel()
+        await performCloudflareInvalidation()
+    }
+
+    private func performCloudflareInvalidation() async {
+        if isCloudflareInvalidationInProgress {
+            await withCheckedContinuation { continuation in
+                cloudflareInvalidationWaiters.append(continuation)
+            }
+            return
+        }
+
+        isCloudflareInvalidationInProgress = true
+        cookieStateGeneration &+= 1
+        removeSharedCloudflareClearance()
+        removePersistedCloudflareClearance()
+        clearCloudflareMetadata()
+        if let cloudflareWebInvalidator {
+            await cloudflareWebInvalidator()
+        } else {
+            await removeDefaultWebCloudflareClearance()
+        }
+        isCloudflareInvalidationInProgress = false
+        let waiters = cloudflareInvalidationWaiters
+        cloudflareInvalidationWaiters.removeAll()
+        for continuation in waiters {
+            continuation.resume()
+        }
+    }
+
+    func cancel(flowID: UUID) {
+        guard activeFlow?.id == flowID else { return }
+        cancel()
+    }
+
     func cancel() {
+        let wasResolvingCloudflare = isCloudflareVerificationPreparing
+            || activeFlow?.kind == .cloudflare
+            || !cloudflareWaiters.isEmpty
+        cloudflarePreparationID = nil
+        isCloudflareVerificationPreparing = false
         activeFlow = nil
+        if wasResolvingCloudflare {
+            resumeCloudflareWaiters(with: false)
+        }
+    }
+
+    private func registerCloudflareWaiter(
+        _ continuation: CheckedContinuation<Bool, Never>,
+        id: UUID,
+        url: URL,
+        cancellation: CloudflareWaiterCancellation
+    ) {
+        guard cancellation.register(), !Task.isCancelled else {
+            cancellation.finish()
+            continuation.resume(returning: false)
+            return
+        }
+        if activeFlow?.kind == .login {
+            cancellation.finish()
+            continuation.resume(returning: false)
+            return
+        }
+
+        cloudflareWaiters[id] = CloudflareWaiter(
+            continuation: continuation,
+            cancellation: cancellation
+        )
+        if !isCloudflareVerificationPreparing,
+           activeFlow?.kind != .cloudflare {
+            Task { @MainActor [weak self] in
+                guard let self, self.cloudflareWaiters[id] != nil else { return }
+                await self.requestCloudflareVerification(url)
+            }
+        }
+    }
+
+    private func cancelCloudflareWaiter(id: UUID) {
+        guard let waiter = cloudflareWaiters.removeValue(forKey: id) else { return }
+        waiter.cancellation.finish()
+        waiter.continuation.resume(returning: false)
+
+        guard cloudflareWaiters.isEmpty,
+              isCloudflareVerificationPreparing || activeFlow?.kind == .cloudflare else {
+            return
+        }
+        cancel()
+    }
+
+    private func resumeCloudflareWaiters(with result: Bool) {
+        let waiters = Array(cloudflareWaiters.values)
+        cloudflareWaiters.removeAll()
+        for waiter in waiters {
+            let wasNotCancelled = waiter.cancellation.finish()
+            waiter.continuation.resume(returning: result && wasNotCancelled)
+        }
     }
 
     private func loadStoredCookieMetadata() {
         guard let storedCookieHeader, !storedCookieHeader.isEmpty else { return }
-        let cookies = cookies(from: storedCookieHeader)
-        lastSyncedCookieCount = cookies.count
+        lastSyncedCookieCount = cookiePairs(from: storedCookieHeader).count
     }
 
-    private func cookieHeader(from cookies: [HTTPCookie]) -> String? {
-        let header = cookies
-            .filter(cookieMatchesCurrentHost)
+    private func cookieHeader(
+        from cookies: [HTTPCookie],
+        preservingStoredCloudflareClearance: Bool
+    ) -> String? {
+        var pairs = cookies.map { (name: $0.name, value: $0.value) }
+        if preservingStoredCloudflareClearance,
+           !pairs.contains(where: { $0.name == SiteWebCookieScope.cloudflareClearanceName }),
+           let storedCookieHeader,
+           let clearance = cookiePairs(from: storedCookieHeader).first(where: {
+               $0.name == SiteWebCookieScope.cloudflareClearanceName
+           }) {
+            pairs.append(clearance)
+        }
+        let header = pairs
             .map { "\($0.name)=\($0.value)" }
             .joined(separator: "; ")
         return header.isEmpty ? nil : header
@@ -212,19 +571,25 @@ final class SiteWebSession {
 
     private func cookies(from header: String) -> [HTTPCookie] {
         guard let host = baseURL.host() else { return [] }
-        return header.split(separator: ";").compactMap { pair in
+        return cookiePairs(from: header).compactMap { pair in
+            HTTPCookie(properties: [
+                .domain: host,
+                .path: "/",
+                .name: pair.name,
+                .value: pair.value,
+                .secure: baseURL.scheme == "https",
+                .expires: Date(timeIntervalSinceNow: 60 * 60 * 24 * 365)
+            ])
+        }
+    }
+
+    private func cookiePairs(from header: String) -> [(name: String, value: String)] {
+        header.split(separator: ";").compactMap { pair in
             let parts = pair.split(separator: "=", maxSplits: 1).map {
                 $0.trimmingCharacters(in: .whitespacesAndNewlines)
             }
             guard parts.count == 2, !parts[0].isEmpty else { return nil }
-            return HTTPCookie(properties: [
-                .domain: host,
-                .path: "/",
-                .name: parts[0],
-                .value: parts[1],
-                .secure: baseURL.scheme == "https",
-                .expires: Date(timeIntervalSinceNow: 60 * 60 * 24 * 365)
-            ])
+            return (parts[0], parts[1])
         }
     }
 
@@ -236,12 +601,73 @@ final class SiteWebSession {
         }
     }
 
-    private var cloudflareClearanceCookie: HTTPCookie? {
-        if let cookie = HTTPCookieStorage.shared.cookies(for: baseURL)?.first(where: { $0.name == "cf_clearance" }) {
-            return cookie
+    private var hasCloudflareClearance: Bool {
+        let sharedCookies = HTTPCookieStorage.shared.cookies(for: baseURL) ?? []
+        if sharedCookies.contains(where: {
+            $0.name == SiteWebCookieScope.cloudflareClearanceName && cookieMatchesCurrentHost($0)
+        }) {
+            return true
         }
-        guard let storedCookieHeader else { return nil }
-        return cookies(from: storedCookieHeader).first { $0.name == "cf_clearance" }
+        guard let storedCookieHeader else { return false }
+        return cookiePairs(from: storedCookieHeader).contains {
+            $0.name == SiteWebCookieScope.cloudflareClearanceName
+        }
+    }
+
+    private var cloudflareClearanceExpiryDate: Date? {
+        let sharedExpirations = (HTTPCookieStorage.shared.cookies(for: baseURL) ?? [])
+            .filter {
+                $0.name == SiteWebCookieScope.cloudflareClearanceName && cookieMatchesCurrentHost($0)
+            }
+            .compactMap(\.expiresDate)
+        return sharedExpirations.max()
+            ?? defaults.object(forKey: cloudflareExpiresAtKey) as? Date
+    }
+
+    private func updateCloudflareExpiryMetadata(from cookies: [HTTPCookie]) {
+        guard let clearance = cookies.first(where: {
+            $0.name == SiteWebCookieScope.cloudflareClearanceName && cookieMatchesCurrentHost($0)
+        }) else {
+            defaults.removeObject(forKey: cloudflareExpiresAtKey)
+            return
+        }
+        if let expiresAt = clearance.expiresDate {
+            defaults.set(expiresAt, forKey: cloudflareExpiresAtKey)
+        } else {
+            defaults.removeObject(forKey: cloudflareExpiresAtKey)
+        }
+    }
+
+    private func clearCloudflareMetadata() {
+        lastCloudflareVerifiedAt = nil
+        defaults.removeObject(forKey: cloudflareVerifiedAtKey)
+        defaults.removeObject(forKey: cloudflareExpiresAtKey)
+    }
+
+    private func removeSharedCloudflareClearance() {
+        HTTPCookieStorage.shared.cookies?.forEach { cookie in
+            if cookie.name == SiteWebCookieScope.cloudflareClearanceName,
+               cookieMatchesCurrentHost(cookie) {
+                HTTPCookieStorage.shared.deleteCookie(cookie)
+            }
+        }
+    }
+
+    private func removePersistedCloudflareClearance() {
+        guard let storedCookieHeader else { return }
+        let remainingPairs = cookiePairs(from: storedCookieHeader).filter {
+            $0.name != SiteWebCookieScope.cloudflareClearanceName
+        }
+        guard remainingPairs.count != cookiePairs(from: storedCookieHeader).count else { return }
+        let remainingHeader = remainingPairs
+            .map { "\($0.name)=\($0.value)" }
+            .joined(separator: "; ")
+        if remainingHeader.isEmpty {
+            cookieStore.removeCookieHeader(for: baseURL)
+        } else {
+            cookieStore.saveCookieHeader(remainingHeader, for: baseURL)
+        }
+        lastSyncedCookieCount = remainingPairs.count
     }
 
     private func removeCookiesForCurrentHost() {
@@ -252,26 +678,34 @@ final class SiteWebSession {
         }
     }
 
-    private func removeDefaultWebCookiesForCurrentHost() async {
-        let cookieStore = WKWebsiteDataStore.default().httpCookieStore
+    private func removeDefaultWebCloudflareClearance() async {
+        let webCookieStore = WKWebsiteDataStore.default().httpCookieStore
         let cookies = await withCheckedContinuation { continuation in
-            cookieStore.getAllCookies { continuation.resume(returning: $0) }
+            webCookieStore.getAllCookies { continuation.resume(returning: $0) }
+        }
+        for cookie in cookies
+        where cookie.name == SiteWebCookieScope.cloudflareClearanceName
+            && cookieMatchesCurrentHost(cookie) {
+            await withCheckedContinuation { continuation in
+                webCookieStore.delete(cookie) { continuation.resume() }
+            }
+        }
+    }
+
+    private func removeDefaultWebCookiesForCurrentHost() async {
+        let webCookieStore = WKWebsiteDataStore.default().httpCookieStore
+        let cookies = await withCheckedContinuation { continuation in
+            webCookieStore.getAllCookies { continuation.resume(returning: $0) }
         }
         for cookie in cookies where cookieMatchesCurrentHost(cookie) {
             await withCheckedContinuation { continuation in
-                cookieStore.delete(cookie) { continuation.resume() }
+                webCookieStore.delete(cookie) { continuation.resume() }
             }
         }
     }
 
     private func cookieMatchesCurrentHost(_ cookie: HTTPCookie) -> Bool {
-        guard let host = baseURL.host()?.lowercased() else { return false }
-        let cookieDomain = cookie.domain
-            .trimmingCharacters(in: CharacterSet(charactersIn: "."))
-            .lowercased()
-        return cookieDomain == host
-            || cookieDomain.hasSuffix(".\(host)")
-            || host.hasSuffix(".\(cookieDomain)")
+        SiteWebCookieScope.matches(cookie, url: baseURL)
     }
 
     private static func keySuffix(for baseURL: URL) -> String {

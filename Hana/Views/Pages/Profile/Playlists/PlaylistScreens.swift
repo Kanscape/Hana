@@ -151,6 +151,7 @@ struct PlaylistsScreen: View {
                     Task { await createPlaylist(title: title, description: description) }
                 }
             )
+            .siteCloudflareFlowPresenter()
         }
         .task(id: services.siteSession.userID) {
             if services.siteSession.isLoggedIn, case .idle = state {
@@ -681,6 +682,7 @@ struct RemotePlaylistDetailScreen: View {
                         Task { await updatePlaylist(title: title, description: description) }
                     }
                 )
+                .siteCloudflareFlowPresenter()
             }
             .task {
                 if case .idle = state {

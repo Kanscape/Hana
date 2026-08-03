@@ -30,13 +30,23 @@ final class HanimeRepository {
         return try parser.parseHome(html)
     }
 
-    func currentUser() async throws -> HanimeUserProfile? {
-        let html = try await httpClient.html(for: .home(), cachePolicy: .reloadIgnoringLocalCacheData)
+    func currentUser(
+        automaticallyResolvesCloudflareChallenges: Bool = true
+    ) async throws -> HanimeUserProfile? {
+        let html = try await httpClient.html(
+            for: .home(),
+            cachePolicy: .reloadIgnoringLocalCacheData,
+            automaticallyResolvesCloudflareChallenges: automaticallyResolvesCloudflareChallenges
+        )
         return try parser.parseCurrentUser(html)
     }
 
     func login(email: String, password: String) async throws -> HanimeUserProfile {
-        let loginHTML = try await httpClient.html(for: .login(), cachePolicy: .reloadIgnoringLocalCacheData)
+        let loginHTML = try await httpClient.html(
+            for: .login(),
+            cachePolicy: .reloadIgnoringLocalCacheData,
+            automaticallyResolvesCloudflareChallenges: false
+        )
         let csrfToken = try parser.parseCSRFToken(loginHTML)
         _ = try await httpClient.postForm(
             to: .login(),
@@ -46,10 +56,13 @@ final class HanimeRepository {
                 "password": password
             ],
             csrfToken: csrfToken,
-            additionalSuccessStatusCodes: [302]
+            additionalSuccessStatusCodes: [302],
+            automaticallyResolvesCloudflareChallenges: false
         )
 
-        guard let user = try await currentUser() else {
+        guard let user = try await currentUser(
+            automaticallyResolvesCloudflareChallenges: false
+        ) else {
             throw HanaNetworkError.authenticationFailed
         }
         return user

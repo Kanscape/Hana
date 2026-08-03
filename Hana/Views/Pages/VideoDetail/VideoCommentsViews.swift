@@ -134,6 +134,7 @@ struct HanimeCommentsSection: View {
             HanimeCommentComposerSheet(title: target.title) { text in
                 try await submit(text, target: target)
             }
+            .siteCloudflareFlowPresenter()
         }
         .sheet(item: $selectedThread) { comment in
             NavigationStack {
@@ -144,11 +145,13 @@ struct HanimeCommentsSection: View {
                     csrfToken: currentCSRFToken
                 )
             }
+            .siteCloudflareFlowPresenter()
         }
         .sheet(item: $reportTarget) { comment in
             HanimeCommentReportSheet(username: comment.username) { reason in
                 try await submitReport(reason, comment: comment)
             }
+            .siteCloudflareFlowPresenter()
         }
     }
 
@@ -466,11 +469,13 @@ struct HanimeCommentThreadView: View {
             HanimeCommentComposerSheet(title: target.title) { text in
                 try await submit(text, target: target)
             }
+            .siteCloudflareFlowPresenter()
         }
         .sheet(item: $reportTarget) { comment in
             HanimeCommentReportSheet(username: comment.username) { reason in
                 try await submitReport(reason, comment: comment)
             }
+            .siteCloudflareFlowPresenter()
         }
     }
 
