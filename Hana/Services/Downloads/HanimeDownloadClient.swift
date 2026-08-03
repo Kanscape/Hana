@@ -1015,7 +1015,10 @@ private enum HanimeDownloadTaskCreationMode {
 
 @Observable
 final class HanimeDownloadClient {
-    static let backgroundSessionIdentifier = "com.kanscape.Hana.downloads"
+    static let backgroundSessionIdentifier: String = {
+        let bundleIdentifier = Bundle.main.bundleIdentifier ?? "sh.celia.hana"
+        return "\(bundleIdentifier).downloads"
+    }()
     private static let backgroundEventsNotification = Notification.Name("HanaDownloadClientBackgroundEvents")
 
     private let httpClient: HanaHTTPClient
