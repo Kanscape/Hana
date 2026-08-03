@@ -1206,9 +1206,11 @@ final class HanimeDownloadClient {
         _ = try? stateStore.markCancelled(requestID: id)
     }
 
-    func remove(id: String) {
-        cancel(id: id)
-        try? stateStore.removeTask(requestID: id)
+    func remove(id: String) throws {
+        if isDownloading(id: id) {
+            cancel(id: id)
+        }
+        try stateStore.removeTask(requestID: id)
     }
 
     func downloadConcurrencyDidChange() {

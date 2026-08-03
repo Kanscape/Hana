@@ -302,16 +302,22 @@ struct DownloadsScreen: View {
     private func delete(items: [DownloadQueueRecord]) {
         var firstError: Error?
         for item in items {
-            services.downloadClient.remove(id: item.id)
-            if let localURL = localFileURL(for: item) {
+            do {
+                try services.downloadClient.remove(id: item.id)
+            } catch {
+                firstError = firstError ?? error
+            }
+
+            let localURL = localFileURL(for: item)
+            modelContext.delete(item)
+
+            if let localURL {
                 do {
                     try services.downloadClient.deleteLocalDownload(fileURL: localURL)
                 } catch {
                     firstError = firstError ?? error
-                    continue
                 }
             }
-            modelContext.delete(item)
         }
         do {
             try modelContext.save()
