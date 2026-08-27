@@ -103,9 +103,9 @@ enum HanaUpdateCheckError: LocalizedError {
 @MainActor
 final class HanaUpdateChecker {
     static let websiteURL = URL(string: "https://hana.celia.sh")!
-    static let repositoryURL = URL(string: "https://github.com/Kanscape/Hana")!
-    static let releasesURL = URL(string: "https://github.com/Kanscape/Hana/releases")!
-    private static let latestReleaseAPIURL = URL(string: "https://api.github.com/repos/Kanscape/Hana/releases/latest")!
+    static let repositoryURL = URL(string: "https://github.com/celia-sh/Hana")!
+    static let releasesURL = URL(string: "https://github.com/celia-sh/Hana/releases")!
+    private static let latestReleaseAPIURL = URL(string: "https://api.github.com/repos/celia-sh/Hana/releases/latest")!
     private static let automaticCheckInterval: TimeInterval = 24 * 60 * 60
 
     var isChecking = false
